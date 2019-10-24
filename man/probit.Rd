@@ -4,16 +4,18 @@
 \alias{probit}
 \title{Probit analysis with random effects}
 \usage{
-probit(formula, item, subject, data, dependence = "marginal")
+probit(formula, item, subject, data, M = 10, dependence = "marginal")
 }
 \arguments{
-\item{formula}{Model formula to be used separately for each item.}
+\item{formula}{Model formula to be used separately for each item. Response variable \code{Y} must be stated as \code{ordered(S)}.}
 
 \item{item}{Categorical variable encoding items.}
 
 \item{subject}{Categorical variable encoding subjects.}
 
 \item{data}{Date frame with data.}
+
+\item{M}{Number of replications in simulation of E-step. Default: \code{M=10}.}
 
 \item{dependence}{Text string (\code{"marginal"/"joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
 }
