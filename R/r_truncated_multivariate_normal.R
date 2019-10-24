@@ -1,7 +1,7 @@
 #' Simulate from a truncated multivariate normal distribution
 #'
 #' @description
-#' Simulate \code{$S \in R^N$} and \code{$Z \in R^d$} given \code{$S \in (\alpha,\beta]$}, where \code{$S = X + \gamma Z$} with \code{$X \sim \mathcal{N}(0,I_N)$} and \code{$Z \sim \mathcal{N}(0,\Gamma^\top \Gamma)$}.
+#' Simulate \code{S in R^N} and \code{Z in R^d} given \code{S in (alpha,beta]$}, where \code{S = X + gamma Z} with \code{X ~ Normal(0,I_N)} and \code{Z ~ Normal(0,Gamma^T Gamma)}.
 #' @param n Number of samples. Default: \code{n=1}.
 #' @param alpha Vector of lower bounds for S component.
 #' @param beta Vector of upper bounds for S component.
