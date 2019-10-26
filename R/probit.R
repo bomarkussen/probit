@@ -52,6 +52,25 @@ probit <- function(formula,subject,data,M=10,dependence="marginal") {
     beta[[i]]  <- pmin(10,tmp$eta1)
   }
 
+  # Find gamma via predictions
+  gamma <- array(NA,dim=c(length(items),nrow(data),length(random.eff)))
+  dimnames(gamma)[[1]] <- items
+  dimnames(gamma)[[3]] <- random.eff
+  mydata <- data
+  for (i in items) {
+    p0 <- predict(regression[[i]],type="linear.predictor",newdata=mydata)
+    for (ii in random.eff) {
+      iii <- (mydata[[i]]==levels(data[[i]])[1])
+      mydata[[ii]] <- 1
+      p1 <- predict(regression[[i]],type="linear.predictor",newdata=mydata)
+      gamma[i,(!is.na(iii))&iii,ii]  <- p0$eta1[(!is.na(iii))&iii]  - p1$eta1[(!is.na(iii))&iii]
+      gamma[i,(!is.na(iii))&!iii,ii] <- p0$eta2[(!is.na(iii))&!iii] - p1$eta2[(!is.na(iii))&!iii]
+      mydata[[ii]] <- 0
+    }
+  }
+
+
+  # Hertil ----
   # TO DO:
   for (i in subjects) {
     mydata <- data[pull(data,!!enquo(subject))==i,]
