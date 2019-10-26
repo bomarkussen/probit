@@ -28,7 +28,7 @@ r_truncated_multivariate_normal(n = 1, alpha, beta, gamma, Gamma,
 Simulations either as a matrix (if \code{which="S"} or \code{"Z"}), or as a list of matrices (if \code{which="SZ"}).
 }
 \description{
-Simulate \code{S in R^N} and \code{Z in R^d} given \code{S in (alpha,beta]$}, where \code{S = X + gamma Z} with \code{X ~ Normal(0,I_N)} and \code{Z ~ Normal(0,Gamma^T Gamma)}.
+Simulate \code{S in R^N} and \code{Z in R^d} given \code{S in (alpha,beta]$}, where \code{S = X + gamma^T Z} with \code{X ~ Normal(0,I_N)} and \code{Z ~ Normal(0,Gamma^T Gamma)}.
 }
 \examples{
 r_truncated_multivariate_normal(n=10,alpha=rep(-1,5),beta=rep(1,5),gamma=matrix(rnorm(10),2,5),Gamma=matrix(c(1,1,0,1),2,2))

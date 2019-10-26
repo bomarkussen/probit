@@ -1,7 +1,7 @@
 #' Simulate from a truncated multivariate normal distribution
 #'
 #' @description
-#' Simulate \code{S in R^N} and \code{Z in R^d} given \code{S in (alpha,beta]$}, where \code{S = X + gamma Z} with \code{X ~ Normal(0,I_N)} and \code{Z ~ Normal(0,Gamma^T Gamma)}.
+#' Simulate \code{S in R^N} and \code{Z in R^d} given \code{S in (alpha,beta]$}, where \code{S = X + gamma^T Z} with \code{X ~ Normal(0,I_N)} and \code{Z ~ Normal(0,Gamma^T Gamma)}.
 #' @param n Number of samples. Default: \code{n=1}.
 #' @param alpha Vector of lower bounds for S component.
 #' @param beta Vector of upper bounds for S component.
@@ -25,7 +25,7 @@ r_truncated_multivariate_normal <- function(n=1,alpha,beta,gamma,Gamma,which="Z"
   if (!is.matrix(gamma)) stop("gamma must be a matrix")
   if (!is.matrix(Gamma)) stop("Gamma must be a matrix")
   if (length(alpha)!=length(beta)) stop("alpha and beta must be of the same length")
-  if (length(alpha)!=ncol(gamma)) stop("gamma must a number of columns equal to length of alpha")
+  if (length(alpha)!=ncol(gamma)) stop("gamma must have number of columns equal to length of alpha")
   if (nrow(Gamma)!=ncol(Gamma)) stop("Gamma must be a square matrix")
   if (nrow(Gamma)!=nrow(gamma)) stop("gamma and Gamma must have same number of rows")
   if (any(alpha>=beta)) stop("alpha must be coordinate-wise strictly less than beta")
@@ -69,9 +69,9 @@ r_truncated_multivariate_normal <- function(n=1,alpha,beta,gamma,Gamma,which="Z"
       f1 <- gamma*Zmin
       f2 <- gamma*Zmax
       x <- colSums(pmin(f1,f2))
-      A <- x + qnorm(U*pnorm(beta-x)+(1-U)*pnorm(alpha-x))
+      A <- x + qnorm(log_weighted_mean(U,pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
       x <- colSums(pmax(f1,f2))
-      B <- x + qnorm(U*pnorm(beta-x)+(1-U)*pnorm(alpha-x))
+      B <- x + qnorm(log_weighted_mean(U,pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
 
       # convergence reached?
       if (max(abs(Zmax-Zmin))<eps) break

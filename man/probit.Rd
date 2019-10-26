@@ -4,26 +4,39 @@
 \alias{probit}
 \title{Probit analysis with random effects}
 \usage{
-probit(formula, item, subject, data, M = 10, dependence = "marginal")
+probit(formula, subject, data, dependence = "marginal", Gamma = NULL,
+  M = 10, EMsteps = 20, eps = 1e-04, maxit = 500,
+  verbose = FALSE)
 }
 \arguments{
-\item{formula}{Model formula to be used separately for each item. Response variable \code{Y} must be stated as \code{ordered(S)}.}
-
-\item{item}{Categorical variable encoding items.}
+\item{formula}{Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.}
 
 \item{subject}{Categorical variable encoding subjects.}
 
 \item{data}{Date frame with data.}
 
+\item{dependence}{Text string (\code{"marginal"/"joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
+
+\item{Gamma}{Choleskey factor for initial variance of random effects. If \code{Gamma=NULL} then initialized at identity matrix. Default: \code{Gamma=NULL}.}
+
 \item{M}{Number of replications in simulation of E-step. Default: \code{M=10}.}
 
-\item{dependence}{Text string (\code{"marginal"/"joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
+\item{EMsteps}{Maximal number of EM steps. Default: \code{EMsteps=20}.}
+
+\item{eps}{Absolute convergence criterion for total log likelihood. Default: \code{eps=1e-4}.}
+
+\item{maxit}{Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=500}.}
+
+\item{verbose}{If TRUE, then print convergence diagnostics. Default: \code{verbose=FALSE}.}
 }
 \value{
 Object of class \code{probit}.
 }
 \description{
-Separate analysis over item.
+Separate analysis over items.
+}
+\details{
+If \code{Gamma=NULL} then predicted random effects are initialized at zero. Otherwise they are simulated from normal distribution with variance \code{Gamma^T Gamma}.
 }
 \note{
 A data frame must be provided, i.e. the \code{data} option is not optional. Variables not appearing in the \code{data}, but appearing in the \code{formula}, will be assumed to be random.
