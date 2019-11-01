@@ -5,7 +5,7 @@
 #' @param formula Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.
 #' @param subject Categorical variable encoding subjects.
 #' @param data Date frame with data.
-#' @param dependence Text string (\code{"marginal"/"joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.
+#' @param dependence Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.
 #' @param Gamma Choleskey factor for initial variance of random effects. If \code{Gamma=NULL} then initialized at identity matrix. Default: \code{Gamma=NULL}.
 #' @param M Number of replications in simulation of E-step. Default: \code{M=10}.
 #' @param EMsteps Maximal number of EM steps. Default: \code{EMsteps=20}.
@@ -20,6 +20,9 @@
 #' @export
 probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EMsteps=20,eps=1e-4,maxit=500,verbose=FALSE) {
   # grab parameters ----
+
+  # fix dependence
+  if (dependence!="marginal") dependence <- "joint"
 
   # find items and subjects
   items <- all.vars(formula[[2]])
@@ -38,13 +41,11 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
   }
 
   # zero.data = data with random effects fixated at zero
-  # Remark: uses pred.random.eff as intermediate variable, which is reset below
-  pred.random.eff <- matrix(0,length(subjects),1+length(random.eff))
-  colnames(pred.random.eff) <- c(subject,random.eff)
-  pred.random.eff <- as_tibble(pred.random.eff)
-  pred.random.eff[,subject] <- subjects
-  zero.data <- full_join(data,pred.random.eff,by=subject)
-
+  zero.data <- matrix(0,length(subjects),1+length(random.eff))
+  colnames(zero.data) <- c(subject,random.eff)
+  zero.data <- as_tibble(zero.data)
+  zero.data[,subject] <- subjects
+  zero.data <- full_join(data,zero.data,by=subject)
 
   # initialization ----
 
@@ -116,9 +117,7 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
 
     # Find alpha and beta from predictions
     # Remark: Set minimal and maximal value to -6 and 6, respectively.
-    #         This corresponds to pnorm(-6) = 9.865876e-10. If we allow for
-    #         smaller probabilities, then numerical instabilities appears to
-    #         arise in the present implementation of the truncated simulations.
+    #         This corresponds to pnorm(-6) = 9.865876e-10.
     for (i in items) {
       tmp <- predict(regression[[i]],type="linear.predictor",newdata = zero.data)
       alpha[[i]] <- pmax(-7,tmp$eta2)
@@ -132,7 +131,6 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
       for (ii in random.eff) {
         iii <- (zero.data[[i]]==levels(data[[i]])[1])
         # predict with random effect increased by one
-        # note: ordinal::clm() uses negative coefficients, and hence sign should not be changed
         zero.data[[ii]] <- 1
         p1 <- predict(regression[[i]],type="linear.predictor",newdata=zero.data)
         gamma[(!is.na(iii))&iii,i,ii]  <- p0$eta1[(!is.na(iii))&iii]  - p1$eta1[(!is.na(iii))&iii]
@@ -160,6 +158,9 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
     # End of EM-loop
   }
 
+  # give names to Cholesky factor
+  colnames(Gamma) <- rownames(Gamma) <- random.eff
+
   # return
-  return(list(regression=regression,Gamma=Gamma))
+  return(structure(list(regression=regression,Gamma=Gamma,dependence=dependence,items=items,subject=subject,random.eff=random.eff,data=data),class="probit"))
 }

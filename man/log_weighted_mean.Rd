@@ -22,4 +22,6 @@ Weighted mean on logarithmic scale
 \examples{
 log_weighted_mean(U=c(1,0.5,0),log.a=c(-10,12,42),log.b=c(60,2,-10))
 log_weighted_mean(U=0.4,log.a=-2.88e-21,log.b=-1.38e-16)
+log_weighted_mean(U=0.295,log.a=-5.748586e-23,log.b=-1.199389e-18)
+log_weighted_mean(U=0.5751,log.a=-6.414215e-22,log.b=-2.806906e-17)
 }

@@ -15,7 +15,7 @@ probit(formula, subject, data, dependence = "marginal", Gamma = NULL,
 
 \item{data}{Date frame with data.}
 
-\item{dependence}{Text string (\code{"marginal"/"joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
+\item{dependence}{Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
 
 \item{Gamma}{Choleskey factor for initial variance of random effects. If \code{Gamma=NULL} then initialized at identity matrix. Default: \code{Gamma=NULL}.}
 
