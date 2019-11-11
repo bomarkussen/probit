@@ -13,6 +13,7 @@
 #'   \item{\code{data}}{Tibble with dataset analyzed}
 #' }
 #' @param x Object of class \code{probit}.
+#' @param y Object of class \code{probit}.
 
 #' @rdname probit-class
 #' @export
@@ -39,4 +40,28 @@ summary.probit <- function(x) {
   cat("\n")
   cat("Individual item regressions:\n")
   print(x$regression)
+}
+
+#' @rdname probit-class
+#' @export
+anova.probit <- function(x,y) {
+  if (!base::setequal(names(x$regression,y$regression))) stop("Models must be fitted on the same items")
+  # set-up tibble with results
+  res <- matrix(0,length(names(x$regression))+1,3)
+  colnames(res) <- c("LR.stat","df","Pr(>Chisq)")
+  res <- bind_cols(tibble(item=c(names(x$regression),"all.items")),as_tibble(res))
+  # extract likelihood ratio tests
+  for (i in names(x$regression)) {
+    tmp <- anova(x$regression[[i]],y$regression[[i]])
+    res[res$item==i,"LR.stat"]    <- tmp[2,"LR.stat"]
+    res[res$item==i,"df"]         <- tmp[2,"df"]
+    res[res$item==i,"Pr(>Chisq)"] <- tmp[2,"Pr(>Chisq)"]
+  }
+  # find overall likelihood ratio test
+  i <- length(names(x$regression))+1
+  res[i,"LR.stat"] <- sum(res[1:length(names(x$regression)),"LR.stat"])
+  res[i,"df"]      <- sum(res[1:length(names(x$regression)),"df"])
+  res[i,"Pr(>Chisq)"] <- 1-pchisq(res$LR.stat[i],df=res$df[i])
+  # return result
+  res
 }
