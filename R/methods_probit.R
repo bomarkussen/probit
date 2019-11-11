@@ -48,21 +48,25 @@ anova.probit <- function(x,y) {
   # sanity check
   if (!base::setequal(x$items,y$items)) stop("Models must be fitted on the same items")
   # set-up tibble with results
-  res <- matrix(0,length(x$items)+1,3)
-  colnames(res) <- c("LR.stat","df","Pr(>Chisq)")
-  res <- bind_cols(tibble(item=c(x$items,"all.items")),as_tibble(res))
+  res <- matrix(0,1+length(x$items),4)
+  colnames(res) <- c("LR.stat","df.fixed","df.random","Pr(>Chisq)")
+  res <- bind_cols(tibble(item=c("all.items",x$items)),as_tibble(res))
   # extract likelihood ratio tests
-  for (i in x$items) {
+  pm <- ifelse(sum(sapply(x$regression,function(u){length(coef(u))}))+nrow(x$Gamma) >
+               sum(sapply(y$regression,function(u){length(coef(u))}))+nrow(y$Gamma),
+               1,-1)
+  for (i in 1:length(x$items)) {
     tmp <- anova(x$regression[[i]],y$regression[[i]])
-    res[res$item==i,"LR.stat"]    <- tmp[2,"LR.stat"]
-    res[res$item==i,"df"]         <- tmp[2,"df"]
-    res[res$item==i,"Pr(>Chisq)"] <- tmp[2,"Pr(>Chisq)"]
+    res$LR.stat[1+i]      <- tmp[2,"LR.stat"]
+    res$df.fixed[1+i]     <- tmp[2,"df"]
+    res$df.random[1+i]    <- pm*(nrow(x$Gamma)-nrow(y$Gamma))/length(x$items)
+    res$"Pr(>Chisq)"[1+i] <- 1-pchisq(res$LR.stat[1+i],df=res$df.fixed[1+i]+res$df.random[1+i])
   }
   # find overall likelihood ratio test
-  i <- length(x$items)+1
-  res[i,"LR.stat"] <- sum(res[1:length(x$items),"LR.stat"])
-  res[i,"df"]      <- sum(res[1:length(x$items),"df"])
-  res[i,"Pr(>Chisq)"] <- 1-pchisq(res$LR.stat[i],df=res$df[i])
+  res$LR.stat[1]      <- sum(res$LR.stat[-1])
+  res$df.fixed[1]     <- sum(res$df.fixed[-1])
+  res$df.random[1]    <- sum(res$df.random[-1])
+  res$"Pr(>Chisq)"[1] <- 1-pchisq(res$LR.stat[1],df=res$df.fixed[1]+res$df.random[1])
   # return result
   res
 }
