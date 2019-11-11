@@ -45,6 +45,7 @@ summary.probit <- function(x) {
 #' @rdname probit-class
 #' @export
 anova.probit <- function(x,y) {
+  # sanity check
   if (!base::setequal(names(x$regression,y$regression))) stop("Models must be fitted on the same items")
   # set-up tibble with results
   res <- matrix(0,length(names(x$regression))+1,3)
