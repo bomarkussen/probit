@@ -46,22 +46,22 @@ summary.probit <- function(x) {
 #' @export
 anova.probit <- function(x,y) {
   # sanity check
-  if (!base::setequal(names(x$regression,y$regression))) stop("Models must be fitted on the same items")
+  if (!base::setequal(x$items,y$items)) stop("Models must be fitted on the same items")
   # set-up tibble with results
-  res <- matrix(0,length(names(x$regression))+1,3)
+  res <- matrix(0,length(x$items)+1,3)
   colnames(res) <- c("LR.stat","df","Pr(>Chisq)")
-  res <- bind_cols(tibble(item=c(names(x$regression),"all.items")),as_tibble(res))
+  res <- bind_cols(tibble(item=c(x$items,"all.items")),as_tibble(res))
   # extract likelihood ratio tests
-  for (i in names(x$regression)) {
+  for (i in x$items) {
     tmp <- anova(x$regression[[i]],y$regression[[i]])
     res[res$item==i,"LR.stat"]    <- tmp[2,"LR.stat"]
     res[res$item==i,"df"]         <- tmp[2,"df"]
     res[res$item==i,"Pr(>Chisq)"] <- tmp[2,"Pr(>Chisq)"]
   }
   # find overall likelihood ratio test
-  i <- length(names(x$regression))+1
-  res[i,"LR.stat"] <- sum(res[1:length(names(x$regression)),"LR.stat"])
-  res[i,"df"]      <- sum(res[1:length(names(x$regression)),"df"])
+  i <- length(x$items)+1
+  res[i,"LR.stat"] <- sum(res[1:length(x$items),"LR.stat"])
+  res[i,"df"]      <- sum(res[1:length(x$items),"df"])
   res[i,"Pr(>Chisq)"] <- 1-pchisq(res$LR.stat[i],df=res$df[i])
   # return result
   res
