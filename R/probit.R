@@ -120,8 +120,8 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
     #         This corresponds to pnorm(-6) = 9.865876e-10.
     for (i in items) {
       tmp <- predict(regression[[i]],type="linear.predictor",newdata = zero.data)
-      alpha[[i]] <- pmax(-7,tmp$eta2)
-      beta[[i]]  <- pmin(7,tmp$eta1)
+      alpha[[i]] <- pmax(-6,tmp$eta2)
+      beta[[i]]  <- pmin(6,tmp$eta1)
     }
 
     # Find gamma via predictions
