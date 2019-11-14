@@ -7,7 +7,7 @@
 #' @param beta Vector of upper bounds for S component.
 #' @param gamma Matrix of linear transformations on Z component.
 #' @param Gamma Cholesky factor for variance on Z component.
-#' @param which Text string (\code{"S"/"Z"/"SZ"}) deciding which componts are return. Default: \code{which="Z"}.
+#' @param which Text string (\code{"S"/"Z"/"SZ"/"all"}) deciding which componts are return. Default: \code{which="Z"}.
 #' @param eps Convergence criteria for coupling from the past. Default: \code{eps=1e-12}.
 #' @param maxit Maximal number of steps in Gibbs sampler. Default: \code{maxit=100}.
 #' @return Simulations either as a matrix (if \code{which="S"} or \code{"Z"}), or as a list of matrices (if \code{which="SZ"}).
@@ -15,6 +15,9 @@
 #' r_truncated_multivariate_normal(n=10,alpha=rep(-1,5),beta=rep(1,5),gamma=matrix(rnorm(10),2,5),Gamma=matrix(c(1,1,0,1),2,2))
 #' @export
 r_truncated_multivariate_normal <- function(n=1,alpha,beta,gamma,Gamma,which="Z",eps=1e-12,maxit=100) {
+  #
+  # with n=10,000 the above example took 26.72 seconds
+  #
   # sanity checks
   # 1. alpha and beta must be vectors of the same length, M
   # 2. alpha must be coordinatewise strictly less then beta
@@ -29,7 +32,7 @@ r_truncated_multivariate_normal <- function(n=1,alpha,beta,gamma,Gamma,which="Z"
   if (nrow(Gamma)!=ncol(Gamma)) stop("Gamma must be a square matrix")
   if (nrow(Gamma)!=nrow(gamma)) stop("gamma and Gamma must have same number of rows")
   if (any(alpha>=beta)) stop("alpha must be coordinate-wise strictly less than beta")
-  if (!is.element(which,c("S","Z","SZ"))) stop("which must be either S, Z or SZ")
+  if (!is.element(which,c("S","Z","SZ","all"))) stop("which must be either S, Z, SZ or all")
   if (eps <= 0) stop("eps must be strictly positive")
   if (maxit <= 0) stop("maxit must be strictly positive")
 
@@ -43,65 +46,47 @@ r_truncated_multivariate_normal <- function(n=1,alpha,beta,gamma,Gamma,which="Z"
 
   # Remark: delta is symmetric, cf. hack below
 
-  # make matrices to contain the simulations
-  if (is.element(which,c("S","SZ"))) S <- matrix(0,n,M)
-  if (is.element(which,c("Z","SZ"))) Z <- matrix(0,n,d)
-
   # make simulations
-  for (m in 1:n) {
-    # initialize
-    gammaT.RtV <- as.vector(t(gamma)%*%Rt%*%rnorm(d))
-    f1 <- delta*alpha
-    f2 <- delta*beta
-    A  <- colSums(pmin(f1,f2)) + gammaT.RtV
-    B  <- colSums(pmax(f1,f2)) + gammaT.RtV
+  S <- replicate(n,{
+    # random input
+    U <- matrix(runif(M*maxit),M,maxit)
+    gammaT.RtV <- replicate(maxit,as.vector(t(gamma)%*%Rt%*%rnorm(d)))
 
-    max.BA <- 0
+    # initialize
+    GA <- alpha
+    GB <- beta
 
     # Gibbs sampler
     for (iter in 1:maxit) {
-      # random input
-      U   <- runif(M)
-      gammaT.RtV <- as.vector(t(gamma)%*%Rt%*%rnorm(d))
+      # update of Z
+      f1 <- delta*GA
+      f2 <- delta*GB
+      A  <- colSums(pmin(f1,f2)) + gammaT.RtV[,iter]
+      B  <- colSums(pmax(f1,f2)) + gammaT.RtV[,iter]
 
       # update of S
       x  <- pmin(A,B)
-      GA <- x + qnorm(log_weighted_mean(U,pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
+      GA <- x + qnorm(log_weighted_mean(U[,iter],pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
       x  <- pmax(A,B)
-      GB <- x + qnorm(log_weighted_mean(U,pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
-
-      # update of Z
-      # remark: uses hack to do elementwise multiplication
-      f1 <- delta*GA
-      f2 <- delta*GB
-      A  <- colSums(pmin(f1,f2)) + gammaT.RtV
-      B  <- colSums(pmax(f1,f2)) + gammaT.RtV
+      GB <- x + qnorm(log_weighted_mean(U[,iter],pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
 
       # convergence reached?
       if (max(abs(B-A))<eps) break
     }
 
-    # keep track of coupling
-    max.BA <- max(max.BA,max(abs(B-A)))
+    # return result
+    c(iter,max(abs(B-A)),(GA+GB)/2)
+  })
 
-    # one additional step: find S
-    U  <- runif(M)
-    x  <- (A+B)/2
-    Sm <- x + qnorm(log_weighted_mean(U,pnorm(beta-x,log.p=TRUE),pnorm(alpha-x,log.p=TRUE)),log.p=TRUE)
-
-    # one additional step: find Z
-    Zm <- as.vector(t(Gamma)%*%delta0%*%Sm + Rt%*%rnorm(d))
-
-    # save results
-    if (is.element(which,c("S","SZ"))) S[m,] <- Sm
-    if (is.element(which,c("Z","SZ"))) Z[m,] <- Zm
-  }
+  # one additional step: find Z
+  Z <- apply(S[-(1:2),],2,function(x){as.vector(t(Gamma)%*%delta0%*%x + Rt%*%rnorm(d))})
 
   # Did any iterations stop before coupling from the past was reached?
-  if (max.BA>=eps) warning(paste("Coupling from the past not reached: max(|B-A|)=",signif(max.BA),". Consider increasing maxit.",sep=""))
+  if (max(S[2,])>=eps) warning(paste("Coupling from the past not reached: max(|B-A|)=",signif(max(S[2,])),". Consider increasing maxit.",sep=""))
 
   # return result
-  if (which=="S") return(S)
-  if (which=="Z") return(Z)
-  if (which=="SZ") return(list(S=S,Z=Z))
+  if (which=="S") return(S=t(S[-c(1:2),]))
+  if (which=="Z") return(Z=t(Z))
+  if (which=="SZ") return(list(S=t(S[-c(1:2),]),Z=t(Z)))
+  if (which=="all") return(list(S=t(S[-c(1:2),]),Z=t(Z),iterations=S[1,],max.BA=S[2,]))
 }

@@ -10,7 +10,7 @@
 #' @param M Number of replications in simulation of E-step. Default: \code{M=10}.
 #' @param EMsteps Maximal number of EM steps. Default: \code{EMsteps=20}.
 #' @param eps Absolute convergence criterion for total log likelihood. Default: \code{eps=1e-4}.
-#' @param maxit Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=500}.
+#' @param maxit Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=50}.
 #' @param verbose If TRUE, then print convergence diagnostics. Default: \code{verbose=FALSE}.
 #' @note
 #' A data frame must be provided, i.e. the \code{data} option is not optional. Variables not appearing in the \code{data}, but appearing in the \code{formula}, will be assumed to be random.
@@ -18,7 +18,7 @@
 #' @details
 #' If \code{Gamma=NULL} then predicted random effects are initialized at zero. Otherwise they are simulated from normal distribution with variance \code{Gamma^T Gamma}.
 #' @export
-probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EMsteps=20,eps=1e-4,maxit=500,verbose=FALSE) {
+probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EMsteps=20,eps=1e-4,maxit=50,verbose=FALSE) {
   # grab parameters ----
 
   # fix dependence
@@ -84,7 +84,10 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
   dimnames(gamma)[[3]] <- random.eff
 
   # EM algorithm ----
+  tmp <- sample(1:2); myseed <- .Random.seed
+  fixate.seed <- FALSE           # if log(likelihood) decreases, then fixate random generator
   total.logLik <- -Inf
+
   for (iter in 0:EMsteps) {
     # M step ----
 
@@ -107,13 +110,19 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
       }
     }
 
-    # did likelihood improve
+    # did likelihood decrease or converge
     tmp <- total.logLik
     total.logLik <- sum(sapply(regression,logLik))
-    if (verbose) cat("EM step =",iter,": logLik =",total.logLik,"\n")
+    if (verbose) cat("EM step =",iter,": logLik =",total.logLik,":",fixate.seed,"\n")
+    if ((!fixate.seed)&(total.logLik<tmp)) {
+      fixate.seed <- TRUE
+      tmp <- total.logLik - 2*eps
+    }
     if (total.logLik-eps < tmp) break
 
     # E step ----
+
+    if (fixate.seed) {.Random.seed <- myseed} else {myseed <- .Random.seed}
 
     # Find alpha and beta from predictions
     # Remark: Set minimal and maximal value to -6 and 6, respectively.
@@ -151,7 +160,7 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
                                         beta=c(as.matrix(beta[ii,]))[iii],
                                         gamma=t(tmp[iii,,drop=FALSE]),
                                         Gamma=Gamma,
-                                        eps=1e-8,
+                                        eps=1e-6,
                                         maxit=maxit)
     }
 
