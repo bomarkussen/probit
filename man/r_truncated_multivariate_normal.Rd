@@ -18,7 +18,7 @@ r_truncated_multivariate_normal(n = 1, alpha, beta, gamma, Gamma,
 
 \item{Gamma}{Cholesky factor for variance on Z component.}
 
-\item{which}{Text string (\code{"S"/"Z"/"SZ"}) deciding which componts are return. Default: \code{which="Z"}.}
+\item{which}{Text string (\code{"S"/"Z"/"SZ"/"all"}) deciding which componts are return. Default: \code{which="Z"}.}
 
 \item{eps}{Convergence criteria for coupling from the past. Default: \code{eps=1e-12}.}
 

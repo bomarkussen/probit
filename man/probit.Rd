@@ -5,8 +5,7 @@
 \title{Probit analysis with random effects}
 \usage{
 probit(formula, subject, data, dependence = "marginal", Gamma = NULL,
-  M = 10, EMsteps = 20, eps = 1e-04, maxit = 500,
-  verbose = FALSE)
+  M = 10, EMsteps = 20, eps = 1e-04, maxit = 50, verbose = FALSE)
 }
 \arguments{
 \item{formula}{Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.}
@@ -25,7 +24,7 @@ probit(formula, subject, data, dependence = "marginal", Gamma = NULL,
 
 \item{eps}{Absolute convergence criterion for total log likelihood. Default: \code{eps=1e-4}.}
 
-\item{maxit}{Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=500}.}
+\item{maxit}{Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=50}.}
 
 \item{verbose}{If TRUE, then print convergence diagnostics. Default: \code{verbose=FALSE}.}
 }
