@@ -154,14 +154,24 @@ probit <- function(formula,subject,data,dependence="marginal",Gamma=NULL,M=10,EM
       ii <- data[[subject]]==i
       tmp <- matrix(gamma[ii,,],sum(ii)*length(items),length(random.eff))
       iii <- apply(tmp,1,function(x){all(!is.na(x))})
-      pred.random.eff[pred.random.eff[[subject]]==i,2:(1+length(random.eff))] <-
-        r_truncated_multivariate_normal(n=M,
-                                        alpha=c(as.matrix(alpha[ii,]))[iii],
-                                        beta=c(as.matrix(beta[ii,]))[iii],
-                                        gamma=t(tmp[iii,,drop=FALSE]),
-                                        Gamma=Gamma,
-                                        eps=1e-6,
-                                        maxit=maxit)
+      if (fixate.seed) {
+        pred.random.eff[pred.random.eff[[subject]]==i,2:(1+length(random.eff))] <-
+          Gibbs_truncated_multivariate_normal(n=M,
+                                              alpha=c(as.matrix(alpha[ii,]))[iii],
+                                              beta=c(as.matrix(beta[ii,]))[iii],
+                                              gamma=t(tmp[iii,,drop=FALSE]),
+                                              Gamma=Gamma,
+                                              steps=20)
+      } else {
+        pred.random.eff[pred.random.eff[[subject]]==i,2:(1+length(random.eff))] <-
+          r_truncated_multivariate_normal(n=M,
+                                          alpha=c(as.matrix(alpha[ii,]))[iii],
+                                          beta=c(as.matrix(beta[ii,]))[iii],
+                                          gamma=t(tmp[iii,,drop=FALSE]),
+                                          Gamma=Gamma,
+                                          eps=1e-6,
+                                          maxit=maxit)
+      }
     }
 
     # End of EM-loop
