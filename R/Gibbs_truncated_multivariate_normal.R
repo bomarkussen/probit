@@ -8,7 +8,7 @@
 #' @param gamma Matrix of linear transformations on Z component.
 #' @param Gamma Cholesky factor for variance on Z component.
 #' @param which Text string (\code{"S"/"Z"/"SZ"}) deciding which componts are return. Default: \code{which="Z"}.
-#' @param steps Number of steps in Gibbs sampler. Default: \code{maxit=20}.
+#' @param steps Number of steps in Gibbs sampler. Default: \code{steps=20}.
 #' @return Simulations either as a matrix (if \code{which="S"} or \code{"Z"}), or as a list of matrices (if \code{which="SZ"}).
 #' @examples
 #' Gibbs_truncated_multivariate_normal(n=10,alpha=rep(-1,5),beta=rep(1,5),gamma=matrix(rnorm(10),2,5),Gamma=matrix(c(1,1,0,1),2,2))
