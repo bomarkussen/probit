@@ -4,8 +4,16 @@
 \alias{r_truncated_multivariate_normal}
 \title{Simulate from a truncated multivariate normal distribution}
 \usage{
-r_truncated_multivariate_normal(n = 1, alpha, beta, gamma, Gamma,
-  which = "Z", eps = 1e-12, maxit = 100)
+r_truncated_multivariate_normal(
+  n = 1,
+  alpha,
+  beta,
+  gamma,
+  Gamma,
+  which = "Z",
+  eps = 1e-12,
+  maxit = 100
+)
 }
 \arguments{
 \item{n}{Number of samples. Default: \code{n=1}.}

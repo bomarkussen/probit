@@ -4,8 +4,15 @@
 \alias{Gibbs_truncated_multivariate_normal}
 \title{Gibbs sampler for a truncated multivariate normal distribution}
 \usage{
-Gibbs_truncated_multivariate_normal(n = 1, alpha, beta, gamma, Gamma,
-  which = "Z", steps = 20)
+Gibbs_truncated_multivariate_normal(
+  n = 1,
+  alpha,
+  beta,
+  gamma,
+  Gamma,
+  which = "Z",
+  steps = 20
+)
 }
 \arguments{
 \item{n}{Number of samples. Default: \code{n=1}.}
@@ -20,7 +27,7 @@ Gibbs_truncated_multivariate_normal(n = 1, alpha, beta, gamma, Gamma,
 
 \item{which}{Text string (\code{"S"/"Z"/"SZ"}) deciding which componts are return. Default: \code{which="Z"}.}
 
-\item{steps}{Number of steps in Gibbs sampler. Default: \code{maxit=20}.}
+\item{steps}{Number of steps in Gibbs sampler. Default: \code{steps=20}.}
 }
 \value{
 Simulations either as a matrix (if \code{which="S"} or \code{"Z"}), or as a list of matrices (if \code{which="SZ"}).

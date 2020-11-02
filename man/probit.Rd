@@ -4,29 +4,51 @@
 \alias{probit}
 \title{Probit analysis with random effects}
 \usage{
-probit(formula, subject, data, dependence = "marginal", Gamma = NULL,
-  M = 10, EMsteps = 20, eps = 1e-04, maxit = 50, verbose = FALSE)
+probit(
+  formula,
+  random,
+  subject = "id",
+  dependence = "marginal",
+  Gamma = NULL,
+  item.name = "item",
+  response.name = NULL,
+  data,
+  data.long = NULL,
+  B = 300,
+  BB = 50,
+  maxit = 20,
+  sig.level = 0.6,
+  verbose = 0
+)
 }
 \arguments{
 \item{formula}{Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.}
 
-\item{subject}{Categorical variable encoding subjects.}
+\item{random}{List of formulas for the random effects. Models are fitted on first appearance observations.}
 
-\item{data}{Date frame with data.}
+\item{subject}{Categorical variable encoding subjects.}
 
 \item{dependence}{Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
 
 \item{Gamma}{Choleskey factor for initial variance of random effects. If \code{Gamma=NULL} then initialized at identity matrix. Default: \code{Gamma=NULL}.}
 
-\item{M}{Number of replications in simulation of E-step. Default: \code{M=10}.}
+\item{item.name}{Character string with name of generated variable identifying the items. Defaults to \code{item.name="item"}.}
 
-\item{EMsteps}{Maximal number of EM steps. Default: \code{EMsteps=20}.}
+\item{response.name}{Character string with name of generated variable containing the responses. Defaults to \code{response.name=NULL}, which corresponds to adding \code{".value"} to \code{item.name}.}
 
-\item{eps}{Absolute convergence criterion for total log likelihood. Default: \code{eps=1e-4}.}
+\item{data}{Date frame with data on the wide format.}
 
-\item{maxit}{Maximal number of steps in underlying coupling from the past algorithm. Default: \code{maxit=50}.}
+\item{data.long}{Possible additional long format data frame with item level explanatory variables. Presently not implemented!}
 
-\item{verbose}{If TRUE, then print convergence diagnostics. Default: \code{verbose=FALSE}.}
+\item{B}{Number of simulations in minimization step. Default: \code{B=300}.}
+
+\item{BB}{Number of simulations per subject in maximization step. Default: \code{BB=50}.}
+
+\item{maxit}{Maximal number of minimization-maximization steps. Default: \code{steps=20}.}
+
+\item{sig.level}{Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.}
+
+\item{verbose}{Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.}
 }
 \value{
 Object of class \code{probit}.
