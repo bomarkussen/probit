@@ -1,14 +1,15 @@
 Package: probit
 Title: Item response analysis with random effects.
-Version: 0.0.1
+Version: 0.0.2
 Authors@R: 
     person(given = "Bo",
            family = "Markussen",
            role = c("aut", "cre"),
            email = "bomar@math.ku.dk",
            comment = c(ORCID = "0000-0001-7793-9620"))
-Description: Implements Simulated-Expectation-Maximization algorithm for probit analysis with random effects.
-Depends: ordinal, tidyverse
+Description: Implements Simulated-Minimization-Maximization algorithm for multivariate response with both interval and ordinal items and with random effects.
+Depends: tidyverse
+Imports: ordinal, furrr, biglm
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

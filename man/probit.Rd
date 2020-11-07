@@ -14,6 +14,8 @@ probit(
   response.name = NULL,
   data,
   data.long = NULL,
+  mu = NULL,
+  psi = NULL,
   B = 300,
   BB = 50,
   maxit = 20,
@@ -40,6 +42,10 @@ probit(
 
 \item{data.long}{Possible additional long format data frame with item level explanatory variables. Presently not implemented!}
 
+\item{mu}{Matrix (no subjects, q) of initial estimates for mu.}
+
+\item{psi}{Matrix (no subjects, q*(q+1)/2) of initial estimates for psi.}
+
 \item{B}{Number of simulations in minimization step. Default: \code{B=300}.}
 
 \item{BB}{Number of simulations per subject in maximization step. Default: \code{BB=50}.}
@@ -51,14 +57,19 @@ probit(
 \item{verbose}{Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.}
 }
 \value{
-Object of class \code{probit}.
+\code{\link{probit-class}} object.
 }
 \description{
 Separate analysis over items.
 }
 \details{
-If \code{Gamma=NULL} then predicted random effects are initialized at zero. Otherwise they are simulated from normal distribution with variance \code{Gamma^T Gamma}.
+
 }
 \note{
-A data frame must be provided, i.e. the \code{data} option is not optional. Variables not appearing in the \code{data}, but appearing in the \code{formula}, will be assumed to be random.
+A data frame must be provided, i.e. the \code{data} option is not optional. Variables that
+coincide with random effects, item identifier or internal name for item response will be removed
+from \code{data}, and an warning will be issued.
+
+The minimization step is implemented via \code{\link[furrr]{future_map}}. This implies that the user may
+activate parallel computations by calling \code{\link[future]{plan}}, e.g. \code{future::plan("multisession", workers = 4)}.
 }
