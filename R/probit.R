@@ -119,7 +119,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   U <- as_tibble(cbind(subjects,matrix(0,length(subjects),q)),
                  .name_repair = "minimal")
   names(U) <- c(subject,random.eff)
-  mydata <- full_join(as_tibble(data),U,by=subject)
+  mydata <- full_join(data,U,by=subject)
 
   # simulate continuous responses for ordinal items
   for (i in items.ordinal) {
@@ -130,14 +130,13 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   }
 
   # linear regression:
-  mydata <- pivot_longer(mydata,all_of(items),names_to = item.name,values_to = response.name)
-  m0 <- biglm::biglm(eval(substitute(update(formula,y~.),list(y=as.name(response.name)))),
-                     data=mydata[!is.na(mydata[[response.name]]),])
+  mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name,values_to = response.name)
+  m.fixed <- biglm::biglm(eval(substitute(update(formula,y~.),list(y=as.name(response.name)))),
+                          data=mydata[!is.na(mydata[[response.name]]),])
 
   # estimate sigma's
-  #  mydata[!is.na(mydata[[response.name]]),response.name] <- residuals(m0)
   ii <- !is.na(mydata[[response.name]])
-  mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m0,newdata=mydata[ii,])
+  mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
   mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
   sigma2 <- vector("list",length(items.interval))
   names(sigma2) <- items.interval
@@ -149,29 +148,55 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   # Remark: Reuses U from above
   eta        <- vector("list",length(items.ordinal))
   names(eta) <- items.ordinal
-  mydata <- full_join(as_tibble(data),U,by=subject)
+  mydata <- full_join(data,U,by=subject)
   for (i in items.ordinal) {
     ii <- !is.na(mydata[[i]]); NN <- sum(ii)
     tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-    my.offset <- predict_slim(m0,bind_cols(mydata[ii,],tmp))
+    my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
     # estimate thresholds from ordinal regression
     m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
     eta[[i]] <- m.clm$alpha
   }
 
   # random effects models
-  lm.random <- vector("list",q); names(lm.random) <- random.eff
-  data.short <- as_tibble(data) %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
+  m.random <- vector("list",q); names(m.random) <- random.eff
+  data.short <- data %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
   U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(subject,random.eff)
   data.short <- full_join(data.short,U,by=subject)
-  for (i in 1:q) lm.random[[i]] <- lm(random[[i]],data=data.short)
+  for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
+
+  # return result from Minimization-Maximization iterations
+  return(MM_probit(cl,maxit,sig.level,verbose,
+                   response.name,item.name,items.interval,items.ordinal,
+                   subject,random,dependence,
+                   m.fixed,sigma2,eta,m.random,Gamma,
+                   mu,psi,
+                   B,BB,
+                   data))
+}
+
+
+# help function for probit() and update.probit() ----
+
+# Minimization-Maximization for probit model
+
+MM_probit <- function(cl,maxit,sig.level,verbose,
+                      response.name,item.name,items.interval,items.ordinal,
+                      subject,random,dependence,
+                      m.fixed,sigma2,eta,m.random,Gamma,
+                      mu,psi,
+                      B,BB,
+                      data) {
+  # grab parameters
+  random.eff <- unlist(lapply(random,function(x){all.vars(x[[2]])}))
+  q          <- length(random.eff)
+  subjects   <- unique(data[[subject]])
+  items      <- c(items.interval,items.ordinal)
 
   # means of random effects
   mean.Z <- matrix(0,length(subjects),q)
-  for (i in 1:q) mean.Z[,i] <- predict_slim(lm.random[[i]],data.short)
-
-
-  # objective function for minimization step ----
+  for (i in 1:q) mean.Z[,i] <-
+    predict_slim(m.random[[i]],data %>% group_by(!!as.name(subject)) %>% slice_head(n=1))
 
   # linear parametrization matrix Q such that
   # 1) diagonal elements in parameter indexes = cumsum(1:q)
@@ -221,7 +246,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
                  -log(pnorm((eta[[name]])[value]-f)-
                         pnorm(c(-Inf,eta[[name]])[value]-f)))},
           data.s.long[[item.name]],data.s.long[[response.name]],
-          predict_slim(m0,newdata=data.s.long)),
+          predict_slim(m.fixed,newdata=data.s.long)),
         nrow(data.s.long)/B,B),na.rm=TRUE)
 
       # hack: set infinite inner sums to a large number
@@ -300,7 +325,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
     # minimization step ----
 
     # minimizations allowing for parallization via future::plan()
-    res <- furrr::future_map(1:length(subjects),estimate.mu.psi,mm=m0,.progress=(verbose>1),.options = furrr::furrr_options(seed = TRUE))
+    res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
     if (verbose > 1) cat("\n")
 
     F1.last <- sapply(res,function(x){x[1]})
@@ -309,10 +334,10 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
 
     # convergence diagnostics
     if (iter==1) {
-      if (verbose>0) cat("iteration",iter,": F1=",sum(F1.last),"\n")
+      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.last),"\n")
     } else {
       pval <- t.test(F1.last-F1.prev,alternative="less")$p.value
-      if (verbose>0) cat("iteration",iter,": F1=",sum(F1.last),", change=",sum(F1.last-F1.prev),", p-value(no decrease)=",pval,"\n")
+      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.last),", change=",sum(F1.last-F1.prev),", p-value(no decrease)=",pval,"\n")
     }
 
     # maximization step ----
@@ -324,13 +349,13 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
     for (s in 1:length(subjects)) {
       U[U[[subject]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
     }
-    mydata <- full_join(as_tibble(data),U,by=subject)
+    mydata <- full_join(data,U,by=subject)
 
     # predict with previous model and simulate responses for ordinal variables
     for (i in items.ordinal) {
       ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
       tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-      my.offset <- predict_slim(m0,bind_cols(mydata[ii,],tmp))
+      my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
       # fit ordinal regression
       m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
       # simulated underlying normal and insert in mydata
@@ -339,18 +364,17 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
       mydata[ii,i] <- my.offset + qnorm(
         pnorm(c(-Inf,m.clm$alpha)[tmp]-my.offset) +
           (pnorm(c(m.clm$alpha,Inf)[tmp]-my.offset) - pnorm(c(-Inf,m.clm$alpha)[tmp]-my.offset))*runif(NN)
-        )
+      )
     }
 
     # linear regression
-    mydata <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
-    m0 <- biglm::biglm(eval(substitute(update(formula,y~.),list(y=as.name(response.name)))),
-                       data=mydata)
+    mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
+    m.fixed <- biglm::biglm(eval(substitute(update(formula(cl$formula),y~.),list(y=as.name(response.name)))),
+                            data=mydata)
 
     # estimate sigma's
-#    mydata[!is.na(mydata[[response.name]]),response.name] <- residuals(m0)
     ii <- !is.na(mydata[[response.name]])
-    mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m0,newdata=mydata[ii,])
+    mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
     mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
     for (i in items.interval) {
       sigma2[[i]] <- mean((mydata[[i]]-mean(mydata[[i]],na.rm=TRUE))^2,na.rm=TRUE)
@@ -358,30 +382,30 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
 
     # predict with previous model and update threshold parameters
     # Remark: Reuses random input U from above
-    mydata <- full_join(as_tibble(data),U,by=subject)
+    mydata <- full_join(data,U,by=subject)
     for (i in items.ordinal) {
       ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
       tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-      my.offset <- predict_slim(m0,bind_cols(mydata[ii,],tmp))
+      my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
       # estimate thresholds from ordinal regression
       m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
       eta[[i]] <- m.clm$alpha
     }
 
     # random effects models
-    data.short <- as_tibble(data) %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
+    data.short <- data %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
     U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(subject,random.eff)
     data.short <- full_join(data.short,U,by=subject)
-    for (i in 1:q) lm.random[[i]] <- lm(random[[i]],data=data.short)
+    for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
 
     # means of random effects
-    for (i in 1:q) mean.Z[,i] <- predict_slim(lm.random[[i]],data.short)
+    for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
 
     # Estimate Gamma
     hat.var <- matrix(rowMeans(
       apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
-      apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
-      ),q,q)
+        apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
+    ),q,q)
     if (dependence=="marginal") {
       hat.var[upper.tri(hat.var)] <- 0
       hat.var[lower.tri(hat.var)] <- 0
@@ -402,8 +426,8 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   # return probit-object ----
   return(structure(list(call=cl,response.name=response.name,
                         item.name=item.name,items.interval=items.interval,items.ordinal=items.ordinal,
-                        subject=subject,ranef=random.eff,dependence=dependence,
-                        m.fixed=m0,sigma2=sigma2,eta=eta,m.random=lm.random,Gamma=Gamma,
+                        subject=subject,random=random,dependence=dependence,
+                        m.fixed=m.fixed,sigma2=sigma2,eta=eta,m.random=m.random,Gamma=Gamma,
                         mu=mu,psi=psi,
                         B=B,BB=BB,F1=F1.last,pvalue=pval,iter=iter,code=code,
                         data=data),class="probit"))

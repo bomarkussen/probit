@@ -10,7 +10,7 @@
 #'   \item{\code{items.interval}}{Character vector with names of interval responses.}
 #'   \item{\code{items.ordinal}}{Character vector with names of ordinal responses.}
 #'   \item{\code{subject}}{Name of subject identifier.}
-#'   \item{\code{ranef}}{Character vector with names of random effects.}
+#'   \item{\code{random}}{List of mean models for the random effects.}
 #'   \item{\code{dependence}}{Text string (\code{marginal} or \code{joint}) specifying the used correlation structure.}
 #'   \item{\code{m.fixed}}{\code{\link[biglm]{biglm}}-object with joint fit of fixed effects. Note that test and confidence intervals on this object does not make direct sense.}
 #'   \item{\code{sigma2}}{List with estimated variances for the interval responses.}
@@ -29,7 +29,8 @@
 #' }
 #'
 #' @param x Object of class \code{probit}.
-#' @param BB Number of simulations per subject in \code{\link{anova}}. If \code{NULL}, then \code{BB} is taken from \code{x}.
+#' @param BB Number of simulations per subject in \code{anova}. If \code{NULL}, then \code{BB} is taken from \code{x}.
+#' @param digits Number of digits in print of \code{probit_anova} object. Defaults to \code{digits=4}.
 #'
 #' @note \code{anova} re-simulates the underlying responses and random
 #' effects for the fixed effects model. Hence the output of the top part
@@ -45,9 +46,9 @@ print.probit <- function(x) {
 #' @rdname probit-class
 #' @export
 summary.probit <- function(x) {
-  cat("Probit regression with",length(x$items.interval),"interval items,",length(x$items.ordinal),"ordinal items, and",length(x$ranef),"random effects.\n")
+  cat("Probit regression with",length(x$items.interval),"interval items,",length(x$items.ordinal),"ordinal items, and",length(x$random),"random effects.\n")
   cat("\n")
-  cat("Total approximative log(likelihood)=",-sum(x$F1),"via (",x$B,",",x$BB,") replications in minimization-maximization steps.\n")
+  cat("Total approximative log(likelihood)=",-sum(x$F1),"via",paste0("(",x$B,",",x$BB,")"),"replications in minimization-maximization steps.\n")
   cat("\n")
   if (x$dependence=="marginal") {
     cat("Variance of random effects (fitted as jointly independent):\n")
@@ -76,9 +77,10 @@ anova.probit <- function(x,BB=NULL) {
   # fit lm-object in order to be able to extract ANOVA table
 
   # take parameters from object
-  subjects <- unique(x$data[[x$subject]])
-  q <- length(x$ranef)
-  items <- c(x$items.interval,x$items.ordinal)
+  subjects   <- unique(x$data[[x$subject]])
+  q          <- length(x$random)
+  items      <- c(x$items.interval,x$items.ordinal)
+  random.eff <- unlist(lapply(x$random,function(x){all.vars(x[[2]])}))
   if (is.null(BB)) BB <- x$BB
 
   # design matrix for Cholesky factor of inverse covariance in normal approximation
@@ -88,7 +90,7 @@ anova.probit <- function(x,BB=NULL) {
   # set-up data matrix with random input
   U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
                  .name_repair = "minimal")
-  names(U) <- c(x$subject,x$ranef)
+  names(U) <- c(x$subject,random.eff)
   for (s in 1:length(subjects)) {
     U[U[[x$subject]]==subjects[s],-1] <- t(x$mu[s,] + solve(matrix(Q%*%x$psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
   }
@@ -122,7 +124,7 @@ anova.probit <- function(x,BB=NULL) {
   my.anova[-nrow(my.anova),"Pr(>F)"] <- 1-pf(my.anova[-nrow(my.anova),"F value"],df1=my.anova[-nrow(my.anova),"Df"],df2=my.anova[nrow(my.anova),"Df"])
   my.anova <- cbind(variable=x$item.name,my.anova)
   # extract anova's for random effect models
-  for (i in x$ranef) {
+  for (i in random.eff) {
     tmp <- cbind(variable=i,as.data.frame(anova(x$m.random[[i]])))
     rownames(tmp)[nrow(tmp)] <- paste0("Residuals.",i)
     my.anova <- rbind(my.anova,tmp)
