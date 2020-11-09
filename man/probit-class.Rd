@@ -4,6 +4,7 @@
 \alias{probit-class}
 \alias{print.probit}
 \alias{summary.probit}
+\alias{confint.probit}
 \alias{anova.probit}
 \alias{print.probit_anova}
 \alias{update.probit}
@@ -11,9 +12,11 @@
 \usage{
 \method{print}{probit}(x)
 
-\method{summary}{probit}(x)
+\method{summary}{probit}(object)
 
-\method{anova}{probit}(x, BB = NULL)
+\method{confint}{probit}(object, level = 0.95)
+
+\method{anova}{probit}(object, BB = NULL)
 
 \method{print}{probit_anova}(x, digits = 4)
 
@@ -33,11 +36,13 @@
 \arguments{
 \item{x}{Object of class \code{probit}.}
 
+\item{object}{Object of class \code{probit}.}
+
+\item{level}{Approximative coverage for confidence interval. Defaults to \code{level=0.95}.}
+
 \item{BB}{Number of simulations per subject in \code{anova} or \code{update}. Defaults to \code{BB=NULL}, which corresponds to \code{BB} taken from the call object.}
 
 \item{digits}{Number of digits in print of \code{probit_anova} object. Defaults to \code{digits=4}.}
-
-\item{object}{Object of class \code{probit}.}
 
 \item{fixed}{Update of right hand side of model formula for fixed effects. Defaults to \code{fixed=NULL}, which corresponds to no update.}
 

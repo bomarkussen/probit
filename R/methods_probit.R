@@ -29,9 +29,10 @@
 #' }
 #'
 #' @param x Object of class \code{probit}.
+#' @param object Object of class \code{probit}.
+#' @param level Approximative coverage for confidence interval. Defaults to \code{level=0.95}.
 #' @param BB Number of simulations per subject in \code{anova} or \code{update}. Defaults to \code{BB=NULL}, which corresponds to \code{BB} taken from the call object.
 #' @param digits Number of digits in print of \code{probit_anova} object. Defaults to \code{digits=4}.
-#' @param object Object of class \code{probit}.
 #' @param fixed Update of right hand side of model formula for fixed effects. Defaults to \code{fixed=NULL}, which corresponds to no update.
 #' @param random List of updates of right hand side of formulas for the random effects. Defaults to \code{random=NULL}, which corresponds to no update.
 #' @param dependence Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Defaults to \code{dependence=NULL}, which corresponds to no update.
@@ -54,43 +55,59 @@ print.probit <- function(x) {
 
 #' @rdname probit-class
 #' @export
-summary.probit <- function(x) {
-  cat("Probit regression with",length(x$items.interval),"interval items,",length(x$items.ordinal),"ordinal items, and",length(x$random),"random effects.\n")
+summary.probit <- function(object) {
+  cat("Probit regression with",length(object$items.interval),"interval items,",length(object$items.ordinal),"ordinal items, and",length(object$random),"random effects.\n")
   cat("\n")
-  cat("Total approximative log(likelihood)=",-sum(x$F1),"via",paste0("(",x$B,",",x$BB,")"),"replications in minimization-maximization steps.\n")
+  cat("Total approximative log(likelihood)=",-sum(object$F1),"via",paste0("(",object$B,",",object$BB,")"),"replications in minimization-maximization steps.\n")
   cat("\n")
-  if (x$dependence=="marginal") {
+  if (object$dependence=="marginal") {
     cat("Variance of random effects (fitted as jointly independent):\n")
   } else {
     cat("Variance of random effects (fitted as jointly dependent):\n")
   }
-  print(solve(t(x$Gamma)%*%(x$Gamma)))
+  print(solve(t(object$Gamma)%*%(object$Gamma)))
   cat("\n")
-  if (length(x$items.interval)>0) {
+  if (length(object$items.interval)>0) {
     cat("Variances on interval items:\n")
-    print(unlist(x$sigma2))
+    print(unlist(object$sigma2))
     cat("\n")
   }
-  if (length(x$items.ordinal)>0) {
+  if (length(object$items.ordinal)>0) {
     cat("Threshold parameters for ordinal items:\n")
-    print(x$eta)
+    print(object$eta)
     cat("\n")
   }
-#  cat("Individual item regressions:\n")
-#  print(x$regression)
 }
+
 
 #' @rdname probit-class
 #' @export
-anova.probit <- function(x,BB=NULL) {
+confint.probit <- function(object,level=0.95) {
+  bhat <- biglm:::coef.biglm(object$m.fixed)
+  SE   <- sqrt(diag(biglm:::vcov.biglm(object$m.fixed)) * object$BB)
+  mydf <- (object$m.fixed$df.resid + sum(!is.na(bhat)))/object$BB - sum(!is.na(bhat))
+
+  # Coefficient table
+  data.frame(estimate=bhat,
+             CI.lower=bhat+qt((1-level)/2,df=mydf)*SE,
+             CI.upper=bhat+qt(1-(1-level)/2,df=mydf)*SE,
+             SE=SE,
+             t.statistic=bhat/SE,
+             p.value=2*(1-pt(abs(bhat/SE),df=mydf)))
+}
+
+
+#' @rdname probit-class
+#' @export
+anova.probit <- function(object,BB=NULL) {
   # fit lm-object in order to be able to extract ANOVA table
 
   # take parameters from object
-  subjects   <- unique(x$data[[x$subject]])
-  q          <- length(x$random)
-  items      <- c(x$items.interval,x$items.ordinal)
-  random.eff <- unlist(lapply(x$random,function(x){all.vars(x[[2]])}))
-  if (is.null(BB)) BB <- x$BB
+  subjects   <- unique(object$data[[object$subject]])
+  q          <- length(object$random)
+  items      <- c(object$items.interval,object$items.ordinal)
+  random.eff <- unlist(lapply(object$random,function(x){all.vars(x[[2]])}))
+  if (is.null(BB)) BB <- object$BB
 
   # design matrix for Cholesky factor of inverse covariance in normal approximation
   Q <- matrix(0,q*q,q*(q+1)/2)
@@ -99,29 +116,29 @@ anova.probit <- function(x,BB=NULL) {
   # set-up data matrix with random input
   U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
                  .name_repair = "minimal")
-  names(U) <- c(x$subject,random.eff)
+  names(U) <- c(object$subject,random.eff)
   for (s in 1:length(subjects)) {
-    U[U[[x$subject]]==subjects[s],-1] <- t(x$mu[s,] + solve(matrix(Q%*%x$psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
+    U[U[[object$subject]]==subjects[s],-1] <- t(object$mu[s,] + solve(matrix(Q%*%object$psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
   }
-  mydata <- full_join(as_tibble(x$data),U,by=x$subject)
+  mydata <- full_join(as_tibble(object$data),U,by=object$subject)
 
   # simulate responses for ordinal variables
-  for (i in x$items.ordinal) {
+  for (i in object$items.ordinal) {
     ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
-    tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- x$item.name
-    my.offset <- predict_slim(x$m.fixed,bind_cols(mydata[ii,],tmp))
+    tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- object$item.name
+    my.offset <- predict_slim(object$m.fixed,bind_cols(mydata[ii,],tmp))
     # simulated underlying normal and insert in mydata
     tmp <- as.numeric(mydata[[i]][ii])
     mydata[,i] <- rep(as.numeric(NA),nrow(mydata))
     mydata[ii,i] <- my.offset + qnorm(
-      pnorm(c(-Inf,x$eta[[i]])[tmp]-my.offset) +
-        (pnorm(c(x$eta[[i]],Inf)[tmp]-my.offset) - pnorm(c(-Inf,x$eta[[i]])[tmp]-my.offset))*runif(NN)
+      pnorm(c(-Inf,object$eta[[i]])[tmp]-my.offset) +
+        (pnorm(c(object$eta[[i]],Inf)[tmp]-my.offset) - pnorm(c(-Inf,object$eta[[i]])[tmp]-my.offset))*runif(NN)
     )
   }
 
   # linear regression
-  mydata <- pivot_longer(mydata,all_of(items),names_to = x$item.name, values_to = x$response.name)
-  m.lm <- lm(eval(substitute(update(formula(x$call$fixed),y~.),list(y=as.name(x$response.name)))),
+  mydata <- pivot_longer(mydata,all_of(items),names_to = object$item.name, values_to = object$response.name)
+  m.lm <- lm(eval(substitute(update(formula(object$call$fixed),y~.),list(y=as.name(object$response.name)))),
              data=mydata)
 
   # extract and correct anova from fixed effect model
@@ -131,10 +148,10 @@ anova.probit <- function(x,BB=NULL) {
   my.anova[,"Mean Sq"] <- my.anova[,"Sum Sq"]/my.anova[,"Df"]
   my.anova[-nrow(my.anova),"F value"] <- my.anova[-nrow(my.anova),"Mean Sq"] / my.anova[nrow(my.anova),"Mean Sq"]
   my.anova[-nrow(my.anova),"Pr(>F)"] <- 1-pf(my.anova[-nrow(my.anova),"F value"],df1=my.anova[-nrow(my.anova),"Df"],df2=my.anova[nrow(my.anova),"Df"])
-  my.anova <- cbind(variable=x$item.name,my.anova)
+  my.anova <- cbind(variable=object$item.name,my.anova)
   # extract anova's for random effect models
   for (i in random.eff) {
-    tmp <- cbind(variable=i,as.data.frame(anova(x$m.random[[i]])))
+    tmp <- cbind(variable=i,as.data.frame(anova(object$m.random[[i]])))
     rownames(tmp)[nrow(tmp)] <- paste0("Residuals.",i)
     my.anova <- rbind(my.anova,tmp)
   }
