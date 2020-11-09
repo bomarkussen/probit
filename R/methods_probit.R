@@ -29,8 +29,17 @@
 #' }
 #'
 #' @param x Object of class \code{probit}.
-#' @param BB Number of simulations per subject in \code{anova}. If \code{NULL}, then \code{BB} is taken from \code{x}.
+#' @param BB Number of simulations per subject in \code{anova} or \code{update}. Defaults to \code{BB=NULL}, which corresponds to \code{BB} taken from the call object.
 #' @param digits Number of digits in print of \code{probit_anova} object. Defaults to \code{digits=4}.
+#' @param object Object of class \code{probit}.
+#' @param fixed Update of right hand side of model formula for fixed effects. Defaults to \code{fixed=NULL}, which corresponds to no update.
+#' @param random List of updates of right hand side of formulas for the random effects. Defaults to \code{random=NULL}, which corresponds to no update.
+#' @param dependence Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Defaults to \code{dependence=NULL}, which corresponds to no update.
+#' @param data Date frame with data on the wide format. Defaults to \code{data=NULL}, which corresponds to \code{data} taken from the call object.
+#' @param B Number of simulations in minimization step. Defaults to \code{B=NULL}, which corresponds to \code{B} taken from the call object.
+#' @param maxit Maximal number of minimization-maximization steps. Defaults to \code{maxit=20}.
+#' @param sig.level Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.
+#' @param verbose Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.
 #'
 #' @note \code{anova} re-simulates the underlying responses and random
 #' effects for the fixed effects model. Hence the output of the top part
@@ -112,7 +121,7 @@ anova.probit <- function(x,BB=NULL) {
 
   # linear regression
   mydata <- pivot_longer(mydata,all_of(items),names_to = x$item.name, values_to = x$response.name)
-  m.lm <- lm(eval(substitute(update(formula(x$call),y~.),list(y=as.name(x$response.name)))),
+  m.lm <- lm(eval(substitute(update(formula(x$call$fixed),y~.),list(y=as.name(x$response.name)))),
              data=mydata)
 
   # extract and correct anova from fixed effect model
@@ -155,29 +164,42 @@ print.probit_anova <- function(x,digits=4) {
   print(y)
 }
 
-# anova.probit <- function(x,y) {
-#   # sanity check
-#   if (!base::setequal(x$items,y$items)) stop("Models must be fitted on the same items")
-#   # set-up tibble with results
-#   res <- matrix(0,1+length(x$items),4)
-#   colnames(res) <- c("LR.stat","df.fixed","df.random","Pr(>Chisq)")
-#   res <- bind_cols(tibble(item=c("all.items",x$items)),as_tibble(res))
-#   # extract likelihood ratio tests
-#   pm <- ifelse(sum(sapply(x$regression,function(u){length(coef(u))}))+nrow(x$Gamma) >
-#                sum(sapply(y$regression,function(u){length(coef(u))}))+nrow(y$Gamma),
-#                1,-1)
-#   for (i in 1:length(x$items)) {
-#     tmp <- anova(x$regression[[i]],y$regression[[i]])
-#     res$LR.stat[1+i]      <- tmp[2,"LR.stat"]
-#     res$df.fixed[1+i]     <- tmp[2,"df"]
-#     res$df.random[1+i]    <- pm*(nrow(x$Gamma)-nrow(y$Gamma))/length(x$items)
-#     res$"Pr(>Chisq)"[1+i] <- 1-pchisq(res$LR.stat[1+i],df=res$df.fixed[1+i]+res$df.random[1+i])
-#   }
-#   # find overall likelihood ratio test
-#   res$LR.stat[1]      <- sum(res$LR.stat[-1])
-#   res$df.fixed[1]     <- sum(res$df.fixed[-1])
-#   res$df.random[1]    <- sum(res$df.random[-1])
-#   res$"Pr(>Chisq)"[1] <- 1-pchisq(res$LR.stat[1],df=res$df.fixed[1]+res$df.random[1])
-#   # return result
-#   res
-# }
+
+#' @rdname probit-class
+#' @export
+update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NULL,B=NULL,BB=NULL,maxit=20,sig.level=0.6,verbose=0) {
+  # update fixed effects?
+  if (is.null(fixed)) {fixed <- formula(object$call$fixed)} else {
+    fixed <- update(formula(object$call$fixed),fixed)
+  }
+
+  # update random effects?
+  if (is.null(random)) {random <- object$random} else {
+    new_random   <- object$random
+    ranef_update <- sapply(random,function(x){all.vars(x[[2]])})
+    random_ii    <- match(ranef_update,sapply(new_random,function(x){all.vars(x[[2]])}))
+    if (any(is.na(random_ii))) stop("Random effects to be updated must already be present")
+    for (i in 1:length(ranef_update)) {
+      new_random[[random_ii[i]]] <- update(new_random[[random_ii[i]]],random[[i]])
+    }
+    random <- new_random
+  }
+
+  # take present values of dependence, B, BB, data?
+  if (is.null(dependence)) {dependence <- object$dependence}
+  if (is.null(B))          {B <- object$B}
+  if (is.null(BB))         {BB <- object$BB}
+  if (is.null(data))       {data <- object$data}
+
+  # fix dependence
+  if (dependence!="marginal") dependence <- "joint"
+
+  # refit and return
+  return(MM_probit(object$call,maxit,sig.level,verbose,
+                   object$response.name,object$item.name,object$items.interval,object$items.ordinal,
+                   object$subject,random,dependence,
+                   object$m.fixed,object$sigma2,object$eta,object$m.random,object$Gamma,
+                   object$mu,object$psi,
+                   B,BB,
+                   data))
+}

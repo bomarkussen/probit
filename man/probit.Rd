@@ -5,7 +5,7 @@
 \title{Probit analysis with random effects}
 \usage{
 probit(
-  formula,
+  fixed,
   random,
   subject = "id",
   dependence = "marginal",
@@ -24,7 +24,7 @@ probit(
 )
 }
 \arguments{
-\item{formula}{Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.}
+\item{fixed}{Model formula for the fixed effect, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.}
 
 \item{random}{List of formulas for the random effects. Models are fitted on first appearance observations.}
 
@@ -50,7 +50,7 @@ probit(
 
 \item{BB}{Number of simulations per subject in maximization step. Default: \code{BB=50}.}
 
-\item{maxit}{Maximal number of minimization-maximization steps. Default: \code{steps=20}.}
+\item{maxit}{Maximal number of minimization-maximization steps. Default: \code{maxit=20}.}
 
 \item{sig.level}{Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.}
 

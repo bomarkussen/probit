@@ -4,7 +4,7 @@
 #'
 #' @description
 #' Separate analysis over items.
-#' @param formula Model formula, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.
+#' @param fixed Model formula for the fixed effect, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.
 #' @param random List of formulas for the random effects. Models are fitted on first appearance observations.
 #' @param subject Categorical variable encoding subjects.
 #' @param dependence Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.
@@ -17,7 +17,7 @@
 #' @param psi Matrix (no subjects, q*(q+1)/2) of initial estimates for psi.
 #' @param B Number of simulations in minimization step. Default: \code{B=300}.
 #' @param BB Number of simulations per subject in maximization step. Default: \code{BB=50}.
-#' @param maxit Maximal number of minimization-maximization steps. Default: \code{steps=20}.
+#' @param maxit Maximal number of minimization-maximization steps. Default: \code{maxit=20}.
 #' @param sig.level Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.
 #' @param verbose Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.
 #' @note
@@ -32,7 +32,7 @@
 #' @details
 #'
 #' @export
-probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,item.name="item",response.name=NULL,data,data.long=NULL,mu=NULL,psi=NULL,B=300,BB=50,maxit=20,sig.level=0.60,verbose=0) {
+probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,item.name="item",response.name=NULL,data,data.long=NULL,mu=NULL,psi=NULL,B=300,BB=50,maxit=20,sig.level=0.60,verbose=0) {
   # sanity check and grab parameters ----
 
   # Take call
@@ -47,7 +47,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   if ((!is.character(response.name))|(length(response.name)==0)) stop("response.name must be a non-vanishing character or NULL")
 
   # find items and make sanity check
-  items <- all.vars(formula[[2]])
+  items <- all.vars(fixed[[2]])
   if (!all(sapply(data[,items],function(x){is.numeric(x)|is.ordered(x)}))) stop("Response variables must be either numeric or ordered factor")
   items.interval <- items[sapply(data[,items],is.numeric)]
   items.ordinal  <- items[sapply(data[,items],is.ordered)]
@@ -56,7 +56,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
   subjects <- unique(data[[subject]])
 
   # names of random effects
-  random.eff <- unlist(lapply(random,function(x){all.vars(x[[2]])}))
+  random.eff <- sapply(random,function(x){all.vars(x[[2]])})
   q <- length(random.eff)
   if (q==0) stop("Present implementation assumes at least one random effect")
 
@@ -131,7 +131,7 @@ probit <- function(formula,random,subject="id",dependence="marginal",Gamma=NULL,
 
   # linear regression:
   mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name,values_to = response.name)
-  m.fixed <- biglm::biglm(eval(substitute(update(formula,y~.),list(y=as.name(response.name)))),
+  m.fixed <- biglm::biglm(eval(substitute(update(fixed,y~.),list(y=as.name(response.name)))),
                           data=mydata[!is.na(mydata[[response.name]]),])
 
   # estimate sigma's
@@ -328,17 +328,26 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
     res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
     if (verbose > 1) cat("\n")
 
-    F1.last <- sapply(res,function(x){x[1]})
-    mu  <- t(sapply(res,function(x){x[1+(1:q)]}))
-    psi <- t(sapply(res,function(x){x[-(1:(q+1))]}))
+    F1.new <- sapply(res,function(x){x[1]})
 
     # convergence diagnostics
     if (iter==1) {
-      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.last),"\n")
+      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.new),"\n")
     } else {
-      pval <- t.test(F1.last-F1.prev,alternative="less")$p.value
-      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.last),", change=",sum(F1.last-F1.prev),", p-value(no decrease)=",pval,"\n")
+      pval <- t.test(F1.new-F1.best,alternative="less")$p.value
+      if (verbose > 0) cat("iteration",iter,": F1=",sum(F1.new),", change=",sum(F1.new-F1.best),", p-value(no decrease)=",pval,"\n")
     }
+
+    # break MM-loop?
+    if ((iter>1) && (pval>sig.level)) {
+      code <- 0
+      break
+    }
+
+    # update parameters in minimization-step
+    F1.best <- F1.new
+    mu  <- t(sapply(res,function(x){x[1+(1:q)]}))
+    psi <- t(sapply(res,function(x){x[-(1:(q+1))]}))
 
     # maximization step ----
 
@@ -369,7 +378,7 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
 
     # linear regression
     mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
-    m.fixed <- biglm::biglm(eval(substitute(update(formula(cl$formula),y~.),list(y=as.name(response.name)))),
+    m.fixed <- biglm::biglm(eval(substitute(update(formula(cl$fixed),y~.),list(y=as.name(response.name)))),
                             data=mydata)
 
     # estimate sigma's
@@ -413,14 +422,7 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
     Gamma <- chol(solve(hat.var))
     rownames(Gamma) <- colnames(Gamma) <- random.eff
 
-    # break MM-loop?
-    if ((iter>1) && (pval>sig.level)) {
-      code <- 0
-      break
-    }
-
-    # update and end EM-loop
-    F1.prev <- F1.last
+    # end MM-loop
   }
 
   # return probit-object ----
@@ -429,6 +431,6 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
                         subject=subject,random=random,dependence=dependence,
                         m.fixed=m.fixed,sigma2=sigma2,eta=eta,m.random=m.random,Gamma=Gamma,
                         mu=mu,psi=psi,
-                        B=B,BB=BB,F1=F1.last,pvalue=pval,iter=iter,code=code,
+                        B=B,BB=BB,F1=F1.best,pvalue=pval,iter=iter,code=code,
                         data=data),class="probit"))
 }
