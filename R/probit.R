@@ -425,6 +425,9 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
     # end MM-loop
   }
 
+  # name columns of mu
+  colnames(mu) <- random.eff
+
   # return probit-object ----
   return(structure(list(call=cl,response.name=response.name,
                         item.name=item.name,items.interval=items.interval,items.ordinal=items.ordinal,

@@ -220,3 +220,48 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
                    B,BB,
                    data))
 }
+
+#' @rdname probit-class
+#' @export
+recover_data.probit <- function(object, ...) {
+  # grab parameters
+  subjects <- unique(object$data[[object$subject]])
+  random.eff <- sapply(object$random,function(x){all.vars(x[[2]])})
+  q          <- length(random.eff)
+
+  # grab predicted random effects
+  U        <- as_tibble(cbind(subjects,object$mu),.name_repair = "minimal")
+  names(U) <- c(object$subject,random.eff)
+  mydata   <- full_join(object$data,U,by=object$subject)
+
+  # recode ordinal items as numeric
+  for (i in object$items.ordinal) mydata[[i]] <- as.numeric(mydata[[i]])
+
+  # make into long format
+  mydata <- pivot_longer(mydata,all_of(c(object$items.interval,object$items.ordinal)),
+                         names_to = object$item.name,values_to = object$response.name)
+
+  # find data without NA's
+  tbl <- get_all_vars(delete.response(terms(object$m.fixed)),
+                      mydata[!is.na(mydata[[object$response.name]]),])
+  attr(tbl, "terms")      <- delete.response(terms(object$m.fixed))
+  attr(tbl, "predictors") <- .all.vars(delete.response(terms(object$m.fixed)))
+  #attr(tbl, "responses")  <- object$response.name
+  tbl
+}
+
+#' @rdname probit-class
+#' @export
+emm_basis.probit <- function(object, trms, xlev, grid, ...) {
+  m <- model.frame(trms, grid, na.action = na.pass, xlev = xlev)
+  X <- model.matrix(trms, m)
+  bhat <- biglm:::coef.biglm(object$m.fixed)
+  V <- biglm:::vcov.biglm(object$m.fixed) * object$BB
+  # PRESUMABLY IS ESTIMABILITY TO BE UPDATED!!!
+  nbasis <- matrix(NA)
+  # SO HAVE A LOOK AT THAT!
+  dfargs <- list(df = (object$m.fixed$df.resid + sum(!is.na(bhat)))/object$BB - sum(!is.na(bhat)))
+  dffun  <- function(k, dfargs) dfargs$df
+  # Return result
+  list(X = X, bhat = bhat, nbasis = nbasis, V = V, dffun = dffun, dfargs = dfargs)
+}

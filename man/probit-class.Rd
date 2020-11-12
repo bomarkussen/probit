@@ -8,6 +8,8 @@
 \alias{anova.probit}
 \alias{print.probit_anova}
 \alias{update.probit}
+\alias{recover_data.probit}
+\alias{emm_basis.probit}
 \title{The \code{probit} class and some basic methods}
 \usage{
 \method{print}{probit}(x)
@@ -32,6 +34,10 @@
   sig.level = 0.6,
   verbose = 0
 )
+
+\method{recover_data}{probit}(object, ...)
+
+\method{emm_basis}{probit}(object, trms, xlev, grid, ...)
 }
 \arguments{
 \item{x}{Object of class \code{probit}.}
