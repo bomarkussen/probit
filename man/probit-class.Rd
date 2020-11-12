@@ -35,9 +35,9 @@
   verbose = 0
 )
 
-\method{recover_data}{probit}(object, ...)
+recover_data.probit(object, ...)
 
-\method{emm_basis}{probit}(object, trms, xlev, grid, ...)
+emm_basis.probit(object, trms, xlev, grid, ...)
 }
 \arguments{
 \item{x}{Object of class \code{probit}.}

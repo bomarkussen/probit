@@ -221,6 +221,11 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
                    data))
 }
 
+# Hack: Define generic functions by stealing from emmeans-package.
+#       Needed to make things work together with future::plan().
+setGeneric("recover_data",emmeans:::recover_data)
+setGeneric("emm_basis",emmeans:::emm_basis)
+
 #' @rdname probit-class
 #' @export
 recover_data.probit <- function(object, ...) {
