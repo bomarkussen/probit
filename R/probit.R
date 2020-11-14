@@ -35,9 +35,6 @@
 probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,item.name="item",response.name=NULL,data,data.long=NULL,mu=NULL,psi=NULL,B=300,BB=50,maxit=20,sig.level=0.60,verbose=0) {
   # sanity check and grab parameters ----
 
-  # Take call
-  cl <- match.call()
-
   # data.long has not yet been implemented
   if (!is.null(data.long)) warning("Additional long format data frame has not yet been implemented")
 
@@ -175,8 +172,8 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
   for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
 
   # return result from Minimization-Maximization iterations
-  return(MM_probit(cl,maxit,sig.level,verbose,
-                   response.name,item.name,items.interval,items.ordinal,
+  return(MM_probit(maxit,sig.level,verbose,
+                   fixed,response.name,item.name,items.interval,items.ordinal,
                    subject,random,dependence,
                    m.fixed,sigma2,eta,m.random,Gamma,
                    mu,psi,
@@ -189,8 +186,8 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
 
 # Minimization-Maximization for probit model
 
-MM_probit <- function(cl,maxit,sig.level,verbose,
-                      response.name,item.name,items.interval,items.ordinal,
+MM_probit <- function(maxit,sig.level,verbose,
+                      fixed,response.name,item.name,items.interval,items.ordinal,
                       subject,random,dependence,
                       m.fixed,sigma2,eta,m.random,Gamma,
                       mu,psi,
@@ -337,11 +334,6 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
   for (iter in 1:maxit) {
     # minimization step ----
 
-#    for (i in 1:length(subjects)) {
-#      cat(subjects[i],":")
-#      cat(estimate.mu.psi(i),"\n")
-#    }
-
     # minimizations allowing for parallization via future::plan()
     res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
     if (verbose > 1) cat("\n")
@@ -396,7 +388,7 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
 
     # linear regression
     mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
-    m.fixed <- biglm::biglm(eval(substitute(update(formula(cl$fixed),y~.),list(y=as.name(response.name)))),
+    m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
                             data=mydata)
 
     # estimate sigma's
@@ -447,7 +439,7 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
   colnames(mu) <- random.eff
 
   # return probit-object ----
-  return(structure(list(call=cl,response.name=response.name,
+  return(structure(list(fixed=fixed,response.name=response.name,
                         item.name=item.name,items.interval=items.interval,items.ordinal=items.ordinal,
                         subject=subject,random=random,dependence=dependence,
                         m.fixed=m.fixed,sigma2=sigma2,eta=eta,m.random=m.random,Gamma=Gamma,
