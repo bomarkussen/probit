@@ -81,6 +81,15 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
     data <- select(data,-any_of(response.name))
   }
 
+  # remove observations with missing explanatory variables
+  i <- complete.cases(select(data,any_of(setdiff(
+    c(all.vars(fixed),unlist(sapply(random,function(x){all.vars(x)}))),
+    c(items,random.eff)))))
+  if (sum(!i)>0) {
+    data <- data[i,]
+    warning("Remove ",sum(!i)," observations with non-complete explanatory variables. NOTE: This may interact badly with update().")
+  }
+
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
 
@@ -311,8 +320,12 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
     data.s <- merge(filter(data,(!!as.name(subject))==subjects[s]),t(U),by=NULL)
     for (i in items.ordinal) data.s[[i]] <- as.numeric(data.s[[i]])
 
-    # minimize F1
-    res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
+    # minimize F1 if there are any observations
+    if (any(!is.na(c(as.matrix(data.s[,c(items.interval,items.ordinal)]))))) {
+      res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
+    } else {
+      res <- list(minimum=0,estimate=c(mu[s,],psi[s,]))
+    }
 
     # return
     return(c(res$minimum,res$estimate))
@@ -323,6 +336,11 @@ MM_probit <- function(cl,maxit,sig.level,verbose,
   pval <- NA
   for (iter in 1:maxit) {
     # minimization step ----
+
+#    for (i in 1:length(subjects)) {
+#      cat(subjects[i],":")
+#      cat(estimate.mu.psi(i),"\n")
+#    }
 
     # minimizations allowing for parallization via future::plan()
     res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
