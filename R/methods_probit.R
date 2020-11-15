@@ -87,13 +87,29 @@ confint.probit <- function(object,level=0.95) {
   SE   <- sqrt(diag(biglm:::vcov.biglm(object$m.fixed)) * object$BB)
   mydf <- (object$m.fixed$df.resid + sum(!is.na(bhat)))/object$BB - sum(!is.na(bhat))
 
-  # Coefficient table
-  data.frame(estimate=bhat,
-             CI.lower=bhat+qt((1-level)/2,df=mydf)*SE,
-             CI.upper=bhat+qt(1-(1-level)/2,df=mydf)*SE,
-             SE=SE,
-             t.statistic=bhat/SE,
-             p.value=2*(1-pt(abs(bhat/SE),df=mydf)))
+  # Coefficient table for fixed effects
+  my.confint <- data.frame(variable=object$item.name,
+                           estimate=bhat,
+                           CI.lower=bhat+qt((1-level)/2,df=mydf)*SE,
+                           CI.upper=bhat+qt(1-(1-level)/2,df=mydf)*SE,
+                           SE=SE,
+                           t.statistic=bhat/SE,
+                           p.value=2*(1-pt(abs(bhat/SE),df=mydf)))
+
+  # Coefficient table for random effects
+  random.eff <- unlist(lapply(object$random,function(x){all.vars(x[[2]])}))
+  for (i in random.eff) {
+    if (length(coef(object$m.random[[i]]))>0) {
+      tmp <- as.data.frame(cbind(summary(object$m.random[[i]])$coefficients,confint(object$m.random[[i]]))[,c(1,5,6,2,3,4)])
+      tmp <- cbind(variable=i,tmp)
+      colnames(tmp) <- colnames(my.confint)
+      rownames(tmp) <- paste0(rownames(tmp),".",i)
+      my.confint <- rbind(my.confint,tmp)
+    }
+  }
+
+  # return result
+  return(structure(my.confint,class=c("probit_confint","data.frame")))
 }
 
 
@@ -158,6 +174,28 @@ anova.probit <- function(object,BB=NULL) {
 
   # return
   return(structure(my.anova,class=c("probit_anova","data.frame")))
+}
+
+#' @rdname probit-class
+#' @export
+print.probit_confint <- function(x,digits=4) {
+  if (!is.null(digits)) x[,-1] <- round(x[,-1],digits=digits)
+  tmp <- rownames(x)
+  x <- as.data.frame(apply(x,2,function(y){ifelse(is.na(y),".",as.character(y))})); rownames(x) <- tmp
+  skip <- data.frame(V1=paste(rep("-",max(8,nchar(x$variable))),collapse=""),
+                     V2=paste(rep("-",max(8,nchar(x$estimate))),collapse=""),
+                     V3=paste(rep("-",max(8,nchar(x$CI.lower))),collapse=""),
+                     V4=paste(rep("-",max(8,nchar(x$CI.upper))),collapse=""),
+                     V5=paste(rep("-",max(2,nchar(x$SE))),collapse=""),
+                     V6=paste(rep("-",max(11,nchar(x$t.statistic))),collapse=""),
+                     V6=paste(rep("-",max(7,nchar(x$p.value))),collapse=""))
+  rownames(skip) <- ""; colnames(skip) <- colnames(x)
+  tmp <- which(c("",x$variable)!=c(x$variable,""))
+  y <- skip; for (i in 2:length(tmp)) {
+    rownames(skip) <- paste(c(" ",rownames(skip)),collapse="")
+    y <- rbind(y,x[tmp[i-1]:(tmp[i]-1),],skip)
+  }
+  print(y)
 }
 
 #' @rdname probit-class

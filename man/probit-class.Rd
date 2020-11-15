@@ -6,6 +6,7 @@
 \alias{summary.probit}
 \alias{confint.probit}
 \alias{anova.probit}
+\alias{print.probit_confint}
 \alias{print.probit_anova}
 \alias{update.probit}
 \alias{recover_data.probit}
@@ -19,6 +20,8 @@
 \method{confint}{probit}(object, level = 0.95)
 
 \method{anova}{probit}(object, BB = NULL)
+
+\method{print}{probit_confint}(x, digits = 4)
 
 \method{print}{probit_anova}(x, digits = 4)
 
