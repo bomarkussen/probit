@@ -253,7 +253,7 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
   return(MM_probit(maxit,sig.level,verbose,
                    fixed,object$response.name,object$item.name,object$items.interval,object$items.ordinal,
                    object$subject,random,dependence,
-                   object$m.fixed,object$sigma2,object$eta,object$m.random,object$Gamma,
+                   object$m.fixed,object$eta,
                    object$mu,object$psi,
                    B,BB,
                    data))
