@@ -396,10 +396,10 @@ MM_probit <- function(maxit,sig.level,verbose,
     for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
 
     # Estimate Gamma
-    hat.var <- matrix(rowMeans(
+    hat.var <- matrix(rowMeans(matrix(
       apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
         apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
-    ),q,q)
+    ,q*q,nrow(mu))),q,q)
     if (dependence=="marginal") {
       hat.var[upper.tri(hat.var)] <- 0
       hat.var[lower.tri(hat.var)] <- 0
@@ -407,6 +407,7 @@ MM_probit <- function(maxit,sig.level,verbose,
     Gamma <- chol(solve(hat.var))
     rownames(Gamma) <- colnames(Gamma) <- random.eff
 
+print(hat.var)
 
     # minimization step ----
 
@@ -434,8 +435,8 @@ MM_probit <- function(maxit,sig.level,verbose,
 
     # update parameters in minimization-step
     F1.best <- F1.new
-    mu  <- t(sapply(res,function(x){x[1+(1:q)]}))
-    psi <- t(sapply(res,function(x){x[-(1:(q+1))]}))
+    mu  <- t(matrix(sapply(res,function(x){x[1+(1:q)]}),q,length(res)))
+    psi <- t(matrix(sapply(res,function(x){x[-(1:(q+1))]}),q*(q+1)/2,length(res)))
 
     # end MM-loop
   }
