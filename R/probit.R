@@ -407,7 +407,7 @@ MM_probit <- function(maxit,sig.level,verbose,
     Gamma <- chol(solve(hat.var))
     rownames(Gamma) <- colnames(Gamma) <- random.eff
 
-print(hat.var)
+#print(hat.var)
 
     # minimization step ----
 
