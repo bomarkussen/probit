@@ -22,9 +22,10 @@ predict_slim <- function(object,newdata) {
   if (class(object)=="lm") {theta <- coef(object)} else {theta <- biglm:::coef.biglm(object)}
 
   theta_notNA <- !is.na(theta)
-  res <- c(model.matrix(delete.response(terms(object)),
-                        model.frame(delete.response(terms(object)),newdata))[,theta_notNA,drop=FALSE] %*%
-             theta[theta_notNA])
+  X <- model.matrix(delete.response(terms(object)),
+                    model.frame(delete.response(terms(object)),newdata))
+  res <- c(X[,theta_notNA[colnames(X)],drop=FALSE] %*%
+           theta[is.element(names(theta),colnames(X)) & theta_notNA])
 
   if (!is.null(attr(object$terms, "offset"))) res <- res +
       model.offset(model.frame(delete.response(terms(object)),newdata))
