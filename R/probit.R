@@ -49,9 +49,6 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
   items.interval <- items[sapply(data[,items],is.numeric)]
   items.ordinal  <- items[sapply(data[,items],is.ordered)]
 
-  # find subjects
-  subjects <- unique(data[[subject]])
-
   # names of random effects
   random.eff <- sapply(random,function(x){all.vars(x[[2]])})
   q <- length(random.eff)
@@ -86,6 +83,9 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
     data <- data[i,]
     warning("Remove ",sum(!i)," observations with non-complete explanatory variables. NOTE: This may interact badly with update().")
   }
+
+  # find subjects
+  subjects <- unique(data[[subject]])
 
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
@@ -356,16 +356,18 @@ MM_probit <- function(maxit,sig.level,verbose,
       m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
                               data=mydata)
 
+      # initiate log(likelihood)
+      logL <- 0
+
       # estimate sigma's
       ii <- !is.na(mydata[[response.name]])
       mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
       mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
       for (i in items.interval) {
         sigma2[[i]] <- mean((mydata[[i]]-mean(mydata[[i]],na.rm=TRUE))^2,na.rm=TRUE)
+        # add log(likelihood)
+        logL <- logL - sum(!is.na(mydata[[i]]))*(log(sigma2[[i]])+1)/(2*BB)
       }
-
-      # To Do: actual log(likelihood) for continuous responses
-      logL <- 0
 
       # predict with previous model and update threshold parameters
       # Remark: Reuses random input U from above

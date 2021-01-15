@@ -220,27 +220,75 @@ print.probit_anova <- function(x,digits=4) {
 }
 
 
+# #' @rdname probit-class
+# #' @export
+# update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NULL,B=NULL,BB=NULL,maxit=20,sig.level=0.6,verbose=0) {
+#   # update fixed effects?
+#   if (is.null(fixed)) {fixed <- formula(object$fixed)} else {
+#     fixed <- update(formula(object$fixed),fixed)
+#   }
+#
+#   # update random effects?
+#   if (is.null(random)) {random <- object$random} else {
+#     new_random   <- object$random
+#     ranef_update <- sapply(random,function(x){all.vars(x[[2]])})
+#     random_ii    <- match(ranef_update,sapply(new_random,function(x){all.vars(x[[2]])}))
+#     if (any(is.na(random_ii))) stop("Random effects to be updated must already be present")
+#     for (i in 1:length(ranef_update)) {
+#       new_random[[random_ii[i]]] <- update(new_random[[random_ii[i]]],random[[i]])
+#     }
+#     random <- new_random
+#   }
+#
+#   # take present values of dependence, B, BB, data?
+#   if (is.null(dependence)) {dependence <- object$dependence}
+#   if (is.null(B))          {B <- object$B}
+#   if (is.null(BB))         {BB <- object$BB}
+#   if (is.null(data))       {data <- object$data}
+#
+#   # fix dependence
+#   if (dependence!="marginal") dependence <- "joint"
+#
+#   # refit and return
+#   return(MM_probit(maxit,sig.level,verbose,
+#                    fixed,object$response.name,object$item.name,object$items.interval,object$items.ordinal,
+#                    object$subject,random,dependence,
+#                    object$m.fixed,object$eta,
+#                    object$mu,object$psi,
+#                    B,BB,
+#                    data))
+# }
+
 #' @rdname probit-class
 #' @export
 update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NULL,B=NULL,BB=NULL,maxit=20,sig.level=0.6,verbose=0) {
+  # is a deep update to be done?
+  deep_update <- !(is.null(fixed)&is.null(random)&is.null(data))
+
   # update fixed effects?
-  if (is.null(fixed)) {fixed <- formula(object$fixed)} else {
+  if (is.null(fixed)) {
+    fixed <- formula(object$fixed)
+    m.fixed <- object$m.fixed
+  } else {
     fixed <- update(formula(object$fixed),fixed)
   }
 
   # update random effects?
   if (is.null(random)) {random <- object$random} else {
-    new_random   <- object$random
-    ranef_update <- sapply(random,function(x){all.vars(x[[2]])})
-    random_ii    <- match(ranef_update,sapply(new_random,function(x){all.vars(x[[2]])}))
-    if (any(is.na(random_ii))) stop("Random effects to be updated must already be present")
-    for (i in 1:length(ranef_update)) {
-      new_random[[random_ii[i]]] <- update(new_random[[random_ii[i]]],random[[i]])
+    new_random <- object$random
+    random_ii  <- match(sapply(random,function(x){all.vars(x[[2]])}),
+                        sapply(new_random,function(x){all.vars(x[[2]])}))
+    for (i in 1:length(random_ii)) {
+      if (is.na(random_ii[i])) {
+        new_random <- c(new_random,random[[i]])
+      } else {
+        new_random[[random_ii[i]]] <- update(new_random[[random_ii[i]]],random[[i]])
+      }
     }
     random <- new_random
   }
 
-  # take present values of dependence, B, BB, data?
+  # update values of dependence, B, BB, data?
   if (is.null(dependence)) {dependence <- object$dependence}
   if (is.null(B))          {B <- object$B}
   if (is.null(BB))         {BB <- object$BB}
@@ -249,12 +297,107 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
 
+  # remove non-used random effects
+  random <- random[is.element(sapply(random,function(x){all.vars(x[[2]])}),
+                              all.vars(delete.response(terms(fixed))))]
+  q <- length(random)
+  if (q<1) stop("Present implementation assumes at least one random effect")
+
+  # find random effects
+  new_random.eff <- sapply(random,function(x){all.vars(x[[2]])})
+  old_random.eff <- sapply(object$random,function(x){all.vars(x[[2]])})
+
+  # remove observations with missing explanatory variables
+  i <- complete.cases(select(data,any_of(setdiff(
+    c(all.vars(fixed),unlist(sapply(random,function(x){all.vars(x)}))),
+    c(object$items.interval,object$items.ordinal,new_random.eff)))))
+  if (sum(!i)>0) {
+    data <- data[i,]
+    warning("Remove ",sum(!i)," observations with non-complete explanatory variables. NOTE: This may interact badly with update().")
+  }
+
+  # find subjects
+  subjects     <- unique(data[[object$subject]])
+  old_subjects <- unique(object$data[[object$subject]])
+
+  # initiate mu and psi
+  # hack: possibly new subjects are set at the mean
+  old_mu  <- matrix(colMeans(object$mu),length(subjects),ncol(object$mu),byrow=TRUE)
+  old_psi <- matrix(colMeans(object$psi),length(subjects),ncol(object$psi),byrow=TRUE)
+  ii <- is.element(subjects,old_subjects)
+  old_mu[ii,]  <- object$mu[match(subjects,old_subjects)[ii]]
+  old_psi[ii,] <- object$psi[match(subjects,old_subjects)[ii]]
+
+  # make deep update if required
+  if (deep_update) {
+    # set-up data matrix with predicted random input in old model
+    U <- as_tibble(cbind(subjects,old_mu),.name_repair = "minimal")
+    names(U) <- c(object$subject,old_random.eff)
+    mydata   <- full_join(data,U,by=object$subject)
+    for (i in object$items.ordinal) mydata[,i] <- as.numeric(as.matrix(mydata[,i]))
+    mydata <- pivot_longer(mydata,
+                           all_of(c(object$items.interval,object$items.ordinal)),
+                           names_to = object$item.name, values_to = object$response.name)
+    mydata[,object$response.name] <- predict_slim(object$m.fixed,mydata)
+    mydata <- select(mydata,-all_of(old_random.eff))
+
+    # criterion function for minimization over (a,A) in new_mu = a + A%*%old_mu
+    crit <- function(par,return.model=FALSE) {
+      # take parameters
+      a <- par[1:q]
+      A <- matrix(par[-(1:q)],length(new_random.eff),length(old_random.eff))
+
+      # set-up predicted random effects
+      U <- as_tibble(cbind(subjects,
+                           matrix(a,length(subjects),q,byrow=TRUE)+old_mu%*%t(A)),
+                     .name_repair = "minimal")
+      names(U) <- c(object$subject,new_random.eff)
+
+      # fit model
+      m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(object$response.name)))),
+                              data=full_join(mydata,U,by=object$subject))
+
+      # return model or deviance
+      if (return.model) {
+        return(m.fixed)
+      } else {
+        return(deviance(m.fixed))
+      }
+    }
+
+    # optimize
+    A <- matrix(0,length(new_random.eff),length(old_random.eff))
+    A[outer(new_random.eff,old_random.eff,"==")] <- 1
+    res <- nlminb(c(rep(0,q),A),crit)
+
+    # find predictions and cholesky inverse variances of new random effects
+    a <- res$par[1:q]
+    A <- matrix(res$par[-(1:q)],length(new_random.eff),length(old_random.eff))
+
+    mu  <- matrix(a,length(subjects),q,byrow=TRUE) + old_mu%*%t(A)
+    psi <- matrix(0,length(subjects),q*(q+1)/2)
+    for (s in 1:length(subjects)) {
+      tmp <- matrix(0,length(old_random.eff),length(old_random.eff))
+      tmp[upper.tri(tmp,diag = TRUE)] <- old_psi[s,]
+      tmp <- chol(solve(A%*%solve(t(tmp)%*%tmp)%*%t(A)))
+      psi[s,] <- tmp[upper.tri(tmp,diag = TRUE)]
+    }
+
+    # estimate new fixed effect model
+    m.fixed <- crit(res$par,return.model = TRUE)
+
+    # end of deep update
+  } else {
+    mu  <- old_mu
+    psi <- old_psi
+  }
+
   # refit and return
   return(MM_probit(maxit,sig.level,verbose,
                    fixed,object$response.name,object$item.name,object$items.interval,object$items.ordinal,
                    object$subject,random,dependence,
-                   object$m.fixed,object$eta,
-                   object$mu,object$psi,
+                   m.fixed,object$eta,
+                   mu,psi,
                    B,BB,
                    data))
 }
