@@ -320,10 +320,14 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
   subjects     <- unique(data[[object$subject]])
   old_subjects <- unique(object$data[[object$subject]])
 
-  # initiate mu and psi
-  # hack: possibly new subjects are set at the mean
-  old_mu  <- matrix(colMeans(object$mu),length(subjects),ncol(object$mu),byrow=TRUE)
+  # initiate mu at model predictions
+  old_mu <- matrix(0,length(subjects),ncol(object$mu))
+  for (i in 1:ncol(object$mu)) {
+    old_mu[,i] <- predict(object$m.random[[i]],newdata=data)
+  }
+  # initiate psi at the mean (doesn't necessarily make any sense)
   old_psi <- matrix(colMeans(object$psi),length(subjects),ncol(object$psi),byrow=TRUE)
+  # reset (mu,psi) for known subjects at their present value
   ii <- is.element(subjects,old_subjects)
   old_mu[ii,]  <- object$mu[match(subjects,old_subjects)[ii]]
   old_psi[ii,] <- object$psi[match(subjects,old_subjects)[ii]]
