@@ -41,6 +41,7 @@
 #' @param maxit Maximal number of minimization-maximization steps. Defaults to \code{maxit=20}.
 #' @param sig.level Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.
 #' @param verbose Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.
+#' @param estimate.models Boolean deciding if model parameters are estimated in \code{update}.
 #'
 #' @note \code{anova} re-simulates the underlying responses and random
 #' effects for the fixed effects model. Hence the output of the top part
@@ -261,9 +262,9 @@ print.probit_anova <- function(x,digits=4) {
 
 #' @rdname probit-class
 #' @export
-update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NULL,B=NULL,BB=NULL,maxit=20,sig.level=0.6,verbose=0) {
+update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NULL,B=NULL,BB=NULL,maxit=20,sig.level=0.6,verbose=0,estimate.models=TRUE) {
   # is a deep update to be done?
-  deep_update <- !(is.null(fixed)&is.null(random)&is.null(data))
+  deep_update <- !(is.null(fixed)&is.null(random))
 
   # update fixed effects?
   if (is.null(fixed)) {
@@ -273,7 +274,7 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
     fixed <- update(formula(object$fixed),fixed)
   }
 
-  # update random effects?
+  # update random effect models
   if (is.null(random)) {random <- object$random} else {
     new_random <- object$random
     random_ii  <- match(sapply(random,function(x){all.vars(x[[2]])}),
@@ -292,7 +293,7 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
   if (is.null(dependence)) {dependence <- object$dependence}
   if (is.null(B))          {B <- object$B}
   if (is.null(BB))         {BB <- object$BB}
-  if (is.null(data))       {data <- object$data}
+  if (is.null(data)) {data <- object$data} else {data <- as_tibble(data)}
 
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
@@ -322,8 +323,9 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
 
   # initiate mu at model predictions
   old_mu <- matrix(0,length(subjects),ncol(object$mu))
+  data.short <- data %>% group_by(!!as.name(object$subject)) %>% slice_head(n=1)
   for (i in 1:ncol(object$mu)) {
-    old_mu[,i] <- predict(object$m.random[[i]],newdata=data)
+    old_mu[,i] <- predict(object$m.random[[i]],newdata=data.short)
   }
   # initiate psi at the mean (doesn't necessarily make any sense)
   old_psi <- matrix(colMeans(object$psi),length(subjects),ncol(object$psi),byrow=TRUE)
@@ -390,21 +392,88 @@ update.probit <- function(object,fixed=NULL,random=NULL,dependence=NULL,data=NUL
     # estimate new fixed effect model
     m.fixed <- crit(res$par,return.model = TRUE)
 
+    # estimate random effects models
+    m.random <- vector("list",length(new_random.eff))
+    names(m.random) <- new_random.eff
+    data.short <- data %>% group_by(!!as.name(object$subject)) %>% slice_head(n=1)
+    U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(object$subject,new_random.eff)
+    data.short <- full_join(data.short,U,by=object$subject)
+    for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
+
+    # means of random effects
+    mean.Z <- matrix(0,length(subjects),q)
+    for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
+
+    # estimate Gamma
+    hat.var <- matrix(rowMeans(matrix(
+      apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
+        apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
+      ,q*q,nrow(mu))),q,q)
+    if (dependence=="marginal") {
+      hat.var[upper.tri(hat.var)] <- 0
+      hat.var[lower.tri(hat.var)] <- 0
+    }
+    Gamma <- chol(solve(hat.var))
+    rownames(Gamma) <- colnames(Gamma) <- new_random.eff
+
     # end of deep update
   } else {
     mu  <- old_mu
     psi <- old_psi
+    m.random <- object$m.random
+    Gamma <- object$Gamma
   }
 
   # refit and return
   return(MM_probit(maxit,sig.level,verbose,
                    fixed,object$response.name,object$item.name,object$items.interval,object$items.ordinal,
                    object$subject,random,dependence,
-                   m.fixed,object$eta,
+                   m.fixed,object$sigma2,object$eta,m.random=m.random,Gamma=Gamma,
                    mu,psi,
                    B,BB,
-                   data))
+                   data,
+                   estimate.models=estimate.models))
 }
+
+
+#' @rdname probit-class
+#' @export
+predict.probit <- function(object,re.form=TRUE) {
+  # find subjects and items
+  subjects <- unique(object$data[[object$subject]])
+  items    <- c(object$items.interval,object$items.ordinal)
+
+  # find random effects
+  random.eff <- sapply(object$random,function(x){all.vars(x[[2]])})
+
+  # if re.form=TRUE, then include predicted random effects
+  if (re.form) {
+    # take prediction random effects
+    mu <- object$mu
+  } else {
+    # use m.random to predict random effects
+    mu <- matrix(0,length(subjects),ncol(object$mu))
+    data.short <- object$data %>% group_by(!!as.name(object$subject)) %>% slice_head(n=1)
+    for (i in 1:ncol(object$mu)) {
+      mu[,i] <- predict(object$m.random[[i]],newdata=data.short)
+    }
+  }
+
+  # set-up data matrix with predicted random input
+  U <- as_tibble(cbind(subjects,mu),.name_repair = "minimal")
+  names(U) <- c(object$subject,random.eff)
+  mydata   <- full_join(object$data,U,by=object$subject)
+  for (i in object$items.ordinal) mydata[,i] <- as.numeric(as.matrix(mydata[,i]))
+  mydata[,items] <- matrix(
+    predict_slim(object$m.fixed,
+                 pivot_longer(mydata, all_of(items),
+                              names_to = object$item.name, values_to = object$response.name)),
+    nrow(mydata),length(items), byrow = TRUE)
+
+  # return prediction
+  return(mydata)
+}
+
 
 # Hack: Define generic functions by stealing from emmeans-package.
 #       Needed to make things work together with future::plan().

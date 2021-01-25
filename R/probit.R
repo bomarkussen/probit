@@ -123,10 +123,11 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
   return(MM_probit(maxit,sig.level,verbose,
                    fixed,response.name,item.name,items.interval,items.ordinal,
                    subject,random,dependence,
-                   m.fixed=NULL,eta=NULL,
+                   m.fixed=NULL,sigma2=NULL,eta=NULL,m.random=NULL,Gamma=Gamma,
                    mu,psi,
                    B,BB,
-                   data))
+                   data,
+                   estimate.models = TRUE))
 }
 
 
@@ -137,24 +138,23 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
 MM_probit <- function(maxit,sig.level,verbose,
                       fixed,response.name,item.name,items.interval,items.ordinal,
                       subject,random,dependence,
-                      m.fixed,eta,
+                      m.fixed,sigma2,eta,m.random,Gamma,
                       mu,psi,
                       B,BB,
-                      data) {
+                      data,
+                      estimate.models=TRUE) {
+  # if estimate.models=FALSE, then only one iteration with a minimization step
+  # and without maximization step is done.
+  if (!estimate.models) {
+    maxit <- 1
+    logL <- 0
+  }
+
   # grab parameters
   random.eff <- unlist(lapply(random,function(x){all.vars(x[[2]])}))
   q          <- length(random.eff)
   subjects   <- unique(data[[subject]])
   items      <- c(items.interval,items.ordinal)
-
-  # set-up containers
-  sigma2   <- vector("list",length(items.interval))
-  m.random <- vector("list",length(random.eff))
-  mean.Z   <- matrix(0,length(subjects),q)
-
-  # naming
-  names(sigma2) <- items.interval
-  names(m.random) <- random.eff
 
   # if NULL, then initialize eta
   if (is.null(eta)) {
@@ -187,6 +187,21 @@ MM_probit <- function(maxit,sig.level,verbose,
     m.fixed <- biglm::biglm(eval(substitute(update(fixed,y~.),list(y=as.name(response.name)))),
                             data=mydata[!is.na(mydata[[response.name]]),])
   }
+
+  # if NULL, then initialize sigma2
+  if (is.null(sigma2)) {
+    sigma2 <- as.list(rep(1,length(items.interval)))
+    names(sigma2) <- items.interval
+  }
+
+  # if NULL, then initialize m.random
+  if (is.null(m.random)) {
+    m.random <- vector("list",length(random.eff))
+    names(m.random) <- random.eff
+  }
+
+  # set-up container for mean of predicted random effects
+  mean.Z <- matrix(0,length(subjects),q)
 
   # linear parametrization matrix Q such that
   # 1) diagonal elements in parameter indexes = cumsum(1:q)
@@ -319,97 +334,100 @@ MM_probit <- function(maxit,sig.level,verbose,
   for (iter in 1:maxit) {
     # maximization step ----
 
-    # set-up data matrix with random input
-    U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
-                   .name_repair = "minimal")
-    names(U) <- c(subject,random.eff)
-    for (s in 1:length(subjects)) {
-      U[U[[subject]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
-    }
+    # estimate model parameters?
+    if (estimate.models) {
 
-    mydata <- full_join(data,U,by=subject)
-
-    # set-up random input for ordinal responses
-    my.runif <- matrix(runif(length(items.ordinal)*nrow(mydata)),
-                       length(items.ordinal),nrow(mydata))
-    rownames(my.runif) <- items.ordinal
-
-    # iterations of maximization step
-    logL.new <- -Inf
-    for (M.iter in 1:10) {
-
-      # predict with previous model and simulate responses for ordinal variables
-      for (i in items.ordinal) {
-        ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
-        tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-        my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
-        tmp <- as.numeric(mydata[[i]][ii])
-        mydata[,i] <- rep(as.numeric(NA),nrow(mydata))
-        mydata[ii,i] <- my.offset + qnorm(
-          pnorm(c(-Inf,eta[[i]])[tmp]-my.offset) +
-            (pnorm(c(eta[[i]],Inf)[tmp]-my.offset) - pnorm(c(-Inf,eta[[i]])[tmp]-my.offset))*my.runif[i,ii]
-        )
+      # set-up data matrix with random input
+      U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
+                     .name_repair = "minimal")
+      names(U) <- c(subject,random.eff)
+      for (s in 1:length(subjects)) {
+        U[U[[subject]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
       }
 
-      # linear regression
-      mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
-      m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
-                              data=mydata)
-
-      # initiate log(likelihood)
-      logL <- 0
-
-      # estimate sigma's
-      ii <- !is.na(mydata[[response.name]])
-      mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
-      mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
-      for (i in items.interval) {
-        sigma2[[i]] <- mean((mydata[[i]]-mean(mydata[[i]],na.rm=TRUE))^2,na.rm=TRUE)
-        # add log(likelihood)
-        logL <- logL - sum(!is.na(mydata[[i]]))*(log(sigma2[[i]])+1)/(2*BB)
-      }
-
-      # predict with previous model and update threshold parameters
-      # Remark: Reuses random input U from above
       mydata <- full_join(data,U,by=subject)
-      for (i in items.ordinal) {
-        ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
-        tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-        my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
-        # estimate thresholds from ordinal regression
-        m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
-        eta[[i]] <- m.clm$alpha
-        # add log(likelihood)
-        logL <- logL + m.clm$logLik/BB
+
+      # set-up random input for ordinal responses
+      my.runif <- matrix(runif(length(items.ordinal)*nrow(mydata)),
+                         length(items.ordinal),nrow(mydata))
+      rownames(my.runif) <- items.ordinal
+
+      # iterations of maximization step
+      logL.new <- -Inf
+      for (M.iter in 1:10) {
+        # predict with previous model and simulate responses for ordinal variables
+        for (i in items.ordinal) {
+          ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
+          tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
+          my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
+          tmp <- as.numeric(mydata[[i]][ii])
+          mydata[,i] <- rep(as.numeric(NA),nrow(mydata))
+          mydata[ii,i] <- my.offset + qnorm(
+            pnorm(c(-Inf,eta[[i]])[tmp]-my.offset) +
+              (pnorm(c(eta[[i]],Inf)[tmp]-my.offset) - pnorm(c(-Inf,eta[[i]])[tmp]-my.offset))*my.runif[i,ii]
+          )
+        }
+
+        # linear regression
+        mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
+        m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
+                                data=mydata)
+
+        # initiate log(likelihood)
+        logL <- 0
+
+        # estimate sigma's
+        ii <- !is.na(mydata[[response.name]])
+        mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
+        mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
+        for (i in items.interval) {
+          sigma2[[i]] <- mean((mydata[[i]]-mean(mydata[[i]],na.rm=TRUE))^2,na.rm=TRUE)
+          # add log(likelihood)
+          logL <- logL - sum(!is.na(mydata[[i]]))*(log(sigma2[[i]])+1)/(2*BB)
+        }
+
+        # predict with previous model and update threshold parameters
+        # Remark: Reuses random input U from above
+        mydata <- full_join(data,U,by=subject)
+        for (i in items.ordinal) {
+          ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
+          tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
+          my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
+          # estimate thresholds from ordinal regression
+          m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
+          eta[[i]] <- m.clm$alpha
+          # add log(likelihood)
+          logL <- logL + m.clm$logLik/BB
+        }
+
+        # end Miter
+        if (logL.new > logL) break
+        logL.new <- logL
       }
 
-      # end Miter
-      if (logL.new > logL) break
-      logL.new <- logL
+      # estimate random effects models
+      data.short <- data %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
+      U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(subject,random.eff)
+      data.short <- full_join(data.short,U,by=subject)
+      for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
+
+      # means of random effects
+      for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
+
+      # estimate Gamma
+      hat.var <- matrix(rowMeans(matrix(
+        apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
+          apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
+        ,q*q,nrow(mu))),q,q)
+      if (dependence=="marginal") {
+        hat.var[upper.tri(hat.var)] <- 0
+        hat.var[lower.tri(hat.var)] <- 0
+      }
+      Gamma <- chol(solve(hat.var))
+      rownames(Gamma) <- colnames(Gamma) <- random.eff
+
+      # end model estimations
     }
-
-    # random effects models
-    data.short <- data %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
-    U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(subject,random.eff)
-    data.short <- full_join(data.short,U,by=subject)
-    for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
-
-    # means of random effects
-    for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
-
-    # Estimate Gamma
-    hat.var <- matrix(rowMeans(matrix(
-      apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
-        apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
-    ,q*q,nrow(mu))),q,q)
-    if (dependence=="marginal") {
-      hat.var[upper.tri(hat.var)] <- 0
-      hat.var[lower.tri(hat.var)] <- 0
-    }
-    Gamma <- chol(solve(hat.var))
-    rownames(Gamma) <- colnames(Gamma) <- random.eff
-
-#print(hat.var)
 
     # minimization step ----
 
@@ -421,11 +439,9 @@ MM_probit <- function(maxit,sig.level,verbose,
 
     # convergence diagnostics
     if (iter==1) {
-#      if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", KL=",-sum(F1.new)-logL.new,"\n")
       if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", F1=",sum(F1.new),"\n")
     } else {
       pval <- t.test(F1.new-F1.best,alternative="less")$p.value
-#      if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", KL=",-sum(F1.new)-logL.new,", change=",sum(F1.new-F1.best),", p-value(no decrease)=",pval,"\n")
       if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", F1=",sum(F1.new),", change=",sum(F1.new-F1.best),", p-value(no decrease)=",pval,"\n")
     }
 
