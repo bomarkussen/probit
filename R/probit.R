@@ -6,7 +6,7 @@
 #' Separate analysis over items.
 #' @param fixed Model formula for the fixed effect, where multivariate responses may be given additively on the left hand side. Responses must be ordered factors.
 #' @param random List of formulas for the random effects. Models are fitted on first appearance observations.
-#' @param subject Categorical variable encoding subjects.
+#' @param subject.name Character string with name of categorical variable encoding subjects.
 #' @param dependence Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.
 #' @param Gamma Choleskey factor for initial variance of random effects. If \code{Gamma=NULL} then initialized at identity matrix. Default: \code{Gamma=NULL}.
 #' @param item.name Character string with name of generated variable identifying the items. Defaults to \code{item.name="item"}.
@@ -32,7 +32,7 @@
 #' @details
 #'
 #' @export
-probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,item.name="item",response.name=NULL,data,data.long=NULL,mu=NULL,psi=NULL,B=300,BB=50,maxit=20,sig.level=0.60,verbose=0) {
+probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NULL,item.name="item",response.name=NULL,data,data.long=NULL,mu=NULL,psi=NULL,B=300,BB=50,maxit=20,sig.level=0.60,verbose=0) {
   # sanity check and grab parameters ----
 
   # data.long has not yet been implemented
@@ -85,7 +85,7 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
   }
 
   # find subjects
-  subjects <- unique(data[[subject]])
+  subjects <- unique(data[[subject.name]])
 
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
@@ -122,7 +122,7 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
   # return result from Minimization-Maximization iterations
   return(MM_probit(maxit,sig.level,verbose,
                    fixed,response.name,item.name,items.interval,items.ordinal,
-                   subject,random,dependence,
+                   subject.name,random,dependence,
                    m.fixed=NULL,sigma2=NULL,eta=NULL,m.random=NULL,Gamma=Gamma,
                    mu,psi,
                    B,BB,
@@ -137,7 +137,7 @@ probit <- function(fixed,random,subject="id",dependence="marginal",Gamma=NULL,it
 
 MM_probit <- function(maxit,sig.level,verbose,
                       fixed,response.name,item.name,items.interval,items.ordinal,
-                      subject,random,dependence,
+                      subject.name,random,dependence,
                       m.fixed,sigma2,eta,m.random,Gamma,
                       mu,psi,
                       B,BB,
@@ -146,14 +146,14 @@ MM_probit <- function(maxit,sig.level,verbose,
   # if estimate.models=FALSE, then only one iteration with a minimization step
   # and without maximization step is done.
   if (!estimate.models) {
-    maxit <- 1
-    logL <- 0
+    maxit    <- 1
+    logL.new <- 0
   }
 
   # grab parameters
   random.eff <- unlist(lapply(random,function(x){all.vars(x[[2]])}))
   q          <- length(random.eff)
-  subjects   <- unique(data[[subject]])
+  subjects   <- unique(data[[subject.name]])
   items      <- c(items.interval,items.ordinal)
 
   # if NULL, then initialize eta
@@ -168,22 +168,20 @@ MM_probit <- function(maxit,sig.level,verbose,
 
   # if NULL, the initialize m.fixed
   if (is.null(m.fixed)) {
-    # mydata with random effects fixated at zero
-    U <- as_tibble(cbind(subjects,matrix(0,length(subjects),q)),
-                   .name_repair = "minimal")
-    names(U) <- c(subject,random.eff)
-    mydata <- full_join(data,U,by=subject)
+    # mydata with predicted random effects
+    U <- as_tibble(cbind(subjects,mu), .name_repair = "minimal")
+    names(U) <- c(subject.name,random.eff)
+    mydata <- full_join(data,U,by=subject.name)
 
     # simulate continuous responses for ordinal items
     for (i in items.ordinal) {
-      # fit ordinal regression
-      m.clm <- ordinal::clm(mydata[[i]]~1,link="probit",na.action = na.exclude)
       # simulated underlying normal and insert in data
       mydata[[i]] <- qnorm(c(0,pnorm(eta[[i]]))[as.numeric(mydata[[i]])] + (diff(c(0,pnorm(eta[[i]]),1))[as.numeric(mydata[[i]])])*runif(nrow(mydata)))
     }
 
-    # linear regression:
+    # linear regression
     mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name,values_to = response.name)
+    mydata[[item.name]] <- factor(mydata[[item.name]],levels=items)
     m.fixed <- biglm::biglm(eval(substitute(update(fixed,y~.),list(y=as.name(response.name)))),
                             data=mydata[!is.na(mydata[[response.name]]),])
   }
@@ -313,7 +311,7 @@ MM_probit <- function(maxit,sig.level,verbose,
     U <- matrix(rnorm(q*B),q,B); rownames(U) <- random.eff
 
     # set-up data matrix
-    data.s <- merge(filter(data,(!!as.name(subject))==subjects[s]),t(U),by=NULL)
+    data.s <- merge(filter(data,(!!as.name(subject.name))==subjects[s]),t(U),by=NULL)
     for (i in items.ordinal) data.s[[i]] <- as.numeric(data.s[[i]])
 
     # minimize F1 if there are any observations
@@ -340,12 +338,12 @@ MM_probit <- function(maxit,sig.level,verbose,
       # set-up data matrix with random input
       U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
                      .name_repair = "minimal")
-      names(U) <- c(subject,random.eff)
+      names(U) <- c(subject.name,random.eff)
       for (s in 1:length(subjects)) {
-        U[U[[subject]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(rnorm(BB*q),q,BB)))
+        U[U[[subject.name]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q))%*%matrix(rnorm(BB*q),q,BB))
       }
 
-      mydata <- full_join(data,U,by=subject)
+      mydata <- full_join(data,U,by=subject.name)
 
       # set-up random input for ordinal responses
       my.runif <- matrix(runif(length(items.ordinal)*nrow(mydata)),
@@ -357,9 +355,11 @@ MM_probit <- function(maxit,sig.level,verbose,
       for (M.iter in 1:10) {
         # predict with previous model and simulate responses for ordinal variables
         for (i in items.ordinal) {
-          ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
-          tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-          my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
+          ii  <- !is.na(mydata[[i]])
+          NN  <- sum(ii)
+          tmp <- tibble(factor(rep(i,NN),levels=items))
+          names(tmp) <- item.name
+          my.offset  <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
           tmp <- as.numeric(mydata[[i]][ii])
           mydata[,i] <- rep(as.numeric(NA),nrow(mydata))
           mydata[ii,i] <- my.offset + qnorm(
@@ -370,6 +370,7 @@ MM_probit <- function(maxit,sig.level,verbose,
 
         # linear regression
         mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
+        mydata[[item.name]] <- factor(mydata[[item.name]],levels=items)
         m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
                                 data=mydata)
 
@@ -388,13 +389,15 @@ MM_probit <- function(maxit,sig.level,verbose,
 
         # predict with previous model and update threshold parameters
         # Remark: Reuses random input U from above
-        mydata <- full_join(data,U,by=subject)
+        mydata <- full_join(data,U,by=subject.name)
         for (i in items.ordinal) {
-          ii  <- !is.na(mydata[[i]]); NN <- sum(ii)
-          tmp <- tibble(factor(rep(i,NN),levels=items)); names(tmp) <- item.name
-          my.offset <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
+          ii  <- !is.na(mydata[[i]])
+          NN  <- sum(ii)
+          tmp <- tibble(factor(rep(i,NN),levels=items))
+          names(tmp) <- item.name
+          my.offset  <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
           # estimate thresholds from ordinal regression
-          m.clm <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
+          m.clm    <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
           eta[[i]] <- m.clm$alpha
           # add log(likelihood)
           logL <- logL + m.clm$logLik/BB
@@ -406,9 +409,10 @@ MM_probit <- function(maxit,sig.level,verbose,
       }
 
       # estimate random effects models
-      data.short <- data %>% group_by(!!as.name(subject)) %>% slice_head(n=1)
-      U <- as.data.frame(cbind(subjects,mu)); names(U) <- c(subject,random.eff)
-      data.short <- full_join(data.short,U,by=subject)
+      data.short <- data %>% group_by(!!as.name(subject.name)) %>% slice_head(n=1)
+      U          <- as.data.frame(cbind(subjects,mu))
+      names(U)   <- c(subject.name,random.eff)
+      data.short <- full_join(data.short,U,by=subject.name)
       for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
 
       # means of random effects
@@ -465,7 +469,7 @@ MM_probit <- function(maxit,sig.level,verbose,
   # return probit-object ----
   return(structure(list(fixed=fixed,response.name=response.name,
                         item.name=item.name,items.interval=items.interval,items.ordinal=items.ordinal,
-                        subject=subject,random=random,dependence=dependence,
+                        subject.name=subject.name,random=random,dependence=dependence,
                         m.fixed=m.fixed,sigma2=sigma2,eta=eta,m.random=m.random,Gamma=Gamma,
                         mu=mu,psi=psi,
                         B=B,BB=BB,F1=F1.best,pvalue=pval,iter=iter,code=code,

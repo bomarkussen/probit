@@ -2,6 +2,7 @@
 
 S3method(anova,probit)
 S3method(confint,probit)
+S3method(predict,probit)
 S3method(print,probit)
 S3method(print,probit_anova)
 S3method(print,probit_confint)
@@ -14,3 +15,4 @@ export(predict_slim)
 export(probit)
 export(r_truncated_multivariate_normal)
 export(recover_data.probit)
+export(update_deep)

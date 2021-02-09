@@ -7,7 +7,7 @@
 probit(
   fixed,
   random,
-  subject = "id",
+  subject.name = "id",
   dependence = "marginal",
   Gamma = NULL,
   item.name = "item",
@@ -28,7 +28,7 @@ probit(
 
 \item{random}{List of formulas for the random effects. Models are fitted on first appearance observations.}
 
-\item{subject}{Categorical variable encoding subjects.}
+\item{subject.name}{Character string with name of categorical variable encoding subjects.}
 
 \item{dependence}{Text string (\code{"marginal" or "joint"}) deciding whether random effects are assumed independent or with a common joint normal distribution. Default: \code{dependence="marginal"}.}
 
