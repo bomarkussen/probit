@@ -54,7 +54,7 @@ probit(
 
 \item{sig.level}{Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.}
 
-\item{verbose}{Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.}
+\item{verbose}{Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0}. Level \code{1} gives progress bar and convergence statistics. Level \code{2} also gives diagnostics for maximization step. Level \code{3} also gives graphical diagnostics for minimization step.}
 }
 \value{
 \code{\link{probit-class}} object.

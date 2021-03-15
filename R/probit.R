@@ -19,7 +19,7 @@
 #' @param BB Number of simulations per subject in maximization step. Default: \code{BB=50}.
 #' @param maxit Maximal number of minimization-maximization steps. Default: \code{maxit=20}.
 #' @param sig.level Significance level at which the iterative stochastic optimizations will be stopped. Defaults to \code{sig.level=0.60}.
-#' @param verbose Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0} corresponding to no output.
+#' @param verbose Numeric controlling amount of convergence diagnostics. Default: \code{verbose=0}. Level \code{1} gives progress bar and convergence statistics. Level \code{2} also gives diagnostics for maximization step. Level \code{3} also gives graphical diagnostics for minimization step.
 #' @note
 #' A data frame must be provided, i.e. the \code{data} option is not optional. Variables that
 #' coincide with random effects, item identifier or internal name for item response will be removed
@@ -43,11 +43,14 @@ probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NU
   if (is.null(response.name)) response.name <- paste(item.name,"value",sep=".")
   if ((!is.character(response.name))|(length(response.name)==0)) stop("response.name must be a non-vanishing character or NULL")
 
+  # TO DO: weight name
+  weight.name <- paste(item.name,"weight",sep=".")
+
   # find items and make sanity check
   items <- all.vars(fixed[[2]])
-  if (!all(sapply(data[,items],function(x){is.numeric(x)|is.ordered(x)}))) stop("Response variables must be either numeric or ordered factor")
+  if (!all(sapply(data[,items],function(x){is.numeric(x)|is.factor(x)}))) stop("Response variables must be either numeric or factor")
   items.interval <- items[sapply(data[,items],is.numeric)]
-  items.ordinal  <- items[sapply(data[,items],is.ordered)]
+  items.ordinal  <- items[sapply(data[,items],is.factor)]
 
   # names of random effects
   random.eff <- sapply(random,function(x){all.vars(x[[2]])})
@@ -57,6 +60,14 @@ probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NU
   # work with tibbles
   data <- as_tibble(data)
 
+  # take levels of factors and recode them as numeric
+  ordinal.levels <- as.list(rep(NA,length(items.ordinal)))
+  names(ordinal.levels) <- items.ordinal
+  for (i in items.ordinal) {
+    ordinal.levels[[i]] <- levels(data[[i]])
+    data[[i]] <- as.numeric(data[[i]])
+  }
+
   # if random effects appear in data then these are removed
   if (length(intersect(names(data),random.eff))>0) {
     warning("Variables ",paste(intersect(names(data),random.eff),collapse=", ")," are removed from data as they are used as random effects")
@@ -65,23 +76,33 @@ probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NU
 
   # if item.name appears in data then it is removed
   if (is.element(item.name,names(data))) {
-    warning("Variable",item.name,"is removed from data as it is used as item.name")
+    warning("Variable ",item.name," is removed from data as it is used as item.name")
     data <- select(data,-any_of(item.name))
   }
 
   # if response.name appears in data then it is removed
   if (is.element(response.name,names(data))) {
-    warning("Variable",response.name,"is removed from data as it is used as response.name")
+    warning("Variable ",response.name," is removed from data as it is used as response.name")
     data <- select(data,-any_of(response.name))
   }
 
+  # if weight.name appears in data then it is removed
+  if (is.element(weight.name,names(data))) {
+    warning("Variable ",weight.name," is removed from data as it is used as weight.name")
+    data <- select(data,-any_of(weight.name))
+  }
+
+  # insert column to contain weight.name
+  tmp <- tibble(weight.name=1); names(tmp) <- weight.name
+  data <- full_join(data,tmp,by=character())
+
   # remove observations with missing explanatory variables
-  i <- complete.cases(select(data,any_of(setdiff(
+  data[[weight.name]] <- as.numeric(complete.cases(select(data,any_of(setdiff(
     c(all.vars(fixed),unlist(sapply(random,function(x){all.vars(x)}))),
-    c(items,random.eff)))))
-  if (sum(!i)>0) {
-    data <- data[i,]
-    warning("Remove ",sum(!i)," observations with non-complete explanatory variables. NOTE: This may interact badly with update().")
+    c(items,random.eff))))))
+  if (sum(1-data[[weight.name]])>0) {
+    warning("Remove ",sum(1-data[[weight.name]])," observations with non-complete explanatory variables. NOTE: This may interact badly with update().")
+    data <- filter(data,!!as.name(weight.name)==1)
   }
 
   # find subjects
@@ -121,7 +142,8 @@ probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NU
 
   # return result from Minimization-Maximization iterations
   return(MM_probit(maxit,sig.level,verbose,
-                   fixed,response.name,item.name,items.interval,items.ordinal,
+                   fixed,response.name,weight.name,
+                   item.name,items.interval,items.ordinal,ordinal.levels,
                    subject.name,random,dependence,
                    m.fixed=NULL,sigma2=NULL,eta=NULL,m.random=NULL,Gamma=Gamma,
                    mu,psi,
@@ -133,10 +155,33 @@ probit <- function(fixed,random,subject.name="id",dependence="marginal",Gamma=NU
 
 # help function for probit() and update.probit() ----
 
+# log-function: log(1-exp(-a))
+# Martin Mächer, log1mexp-note, ETH Zurich, October 2012.
+# log1mexp <- function(a) {ifelse(a<0.693,log(-expm1(-a)),log1p(-exp(-a)))}
+
+# log normal probability
+log_pnorm <- function(a,b) {
+  mysign <- -sign(pmin(a,b))
+  log.b  <- pnorm(pmax(mysign*a,mysign*b),log.p=TRUE)
+  log.a  <- pnorm(pmin(mysign*a,mysign*b),log.p=TRUE)
+  log.b + ifelse(log.b-log.a<0.693,log(-expm1(log.a-log.b)),log1p(-exp(log.a-log.b)))
+}
+
+# probit analysis criterion function
+my.clm <- function(par,y,ff,logF) {
+  #  tmp <- cumsum(c(0,rep(par[1],length(ordinal.levels[[i]])-2)))
+  tmp <- cumsum(c(par[2],abs(par[-(1:2)])+0.001))
+  -sum(logF((c(tmp,Inf)[y]-ff)/sqrt(abs(par[1])+0.001),
+            (c(-Inf,tmp)[y]-ff)/sqrt(abs(par[1])+0.001)))
+}
+
+
+
 # Maximization-Minimization for probit model
 
 MM_probit <- function(maxit,sig.level,verbose,
-                      fixed,response.name,item.name,items.interval,items.ordinal,
+                      fixed,response.name,weight.name,
+                      item.name,items.interval,items.ordinal,ordinal.levels,
                       subject.name,random,dependence,
                       m.fixed,sigma2,eta,m.random,Gamma,
                       mu,psi,
@@ -146,8 +191,8 @@ MM_probit <- function(maxit,sig.level,verbose,
   # if estimate.models=FALSE, then only one iteration with a minimization step
   # and without maximization step is done.
   if (!estimate.models) {
-    maxit    <- 1
-    logL.new <- 0
+    maxit <- 1
+    logL  <- 0
   }
 
   # grab parameters
@@ -156,12 +201,18 @@ MM_probit <- function(maxit,sig.level,verbose,
   subjects   <- unique(data[[subject.name]])
   items      <- c(items.interval,items.ordinal)
 
+  # if NULL, then initialize sigma2
+  if (is.null(sigma2)) {
+    sigma2 <- as.list(rep(1,length(items)))
+    names(sigma2) <- items
+  }
+
   # if NULL, then initialize eta
   if (is.null(eta)) {
-    eta        <- vector("list",length(items.ordinal))
-    names(eta) <- items.ordinal
+    eta        <- vector("list",length(items))
+    names(eta) <- items
     for (i in items.ordinal) {
-      tmp <- table(as.numeric(data[[i]]))
+      tmp <- pmax(1,table(factor(data[[i]],levels=ordinal.levels[[i]])))
       eta[[i]] <- qnorm(cumsum(tmp[-length(tmp)])/sum(tmp))
     }
   }
@@ -176,20 +227,22 @@ MM_probit <- function(maxit,sig.level,verbose,
     # simulate continuous responses for ordinal items
     for (i in items.ordinal) {
       # simulated underlying normal and insert in data
-      mydata[[i]] <- qnorm(c(0,pnorm(eta[[i]]))[as.numeric(mydata[[i]])] + (diff(c(0,pnorm(eta[[i]]),1))[as.numeric(mydata[[i]])])*runif(nrow(mydata)))
+      a <- (c(-Inf,eta[[i]])[mydata[[i]]] - 0)/sqrt(sigma2[[i]])
+      b <- (c(eta[[i]],Inf)[mydata[[i]]] - 0)/sqrt(sigma2[[i]])
+      flip <- -sign(a)
+      a <- pnorm(flip*a)
+      b <- pnorm(flip*b)
+      mydata[[i]] <- 0 + sqrt(sigma2[[i]])*flip*qnorm(pmin(a,b) + abs(b-a)*runif(nrow(mydata)))
     }
 
     # linear regression
     mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name,values_to = response.name)
     mydata[[item.name]] <- factor(mydata[[item.name]],levels=items)
+#    mydata <- mydata[!is.na(mydata[[response.name]]),]
     m.fixed <- biglm::biglm(eval(substitute(update(fixed,y~.),list(y=as.name(response.name)))),
-                            data=mydata[!is.na(mydata[[response.name]]),])
-  }
-
-  # if NULL, then initialize sigma2
-  if (is.null(sigma2)) {
-    sigma2 <- as.list(rep(1,length(items.interval)))
-    names(sigma2) <- items.interval
+                            data=mydata)
+#    m.fixed <- lm(eval(substitute(update(fixed,y~.),list(y=as.name(response.name)))),
+#                            data=mydata)
   }
 
   # if NULL, then initialize m.random
@@ -197,9 +250,6 @@ MM_probit <- function(maxit,sig.level,verbose,
     m.random <- vector("list",length(random.eff))
     names(m.random) <- random.eff
   }
-
-  # set-up container for mean of predicted random effects
-  mean.Z <- matrix(0,length(subjects),q)
 
   # linear parametrization matrix Q such that
   # 1) diagonal elements in parameter indexes = cumsum(1:q)
@@ -209,15 +259,36 @@ MM_probit <- function(maxit,sig.level,verbose,
   Q[matrix(1:(q*q),q,q)[upper.tri(matrix(0,q,q),diag=TRUE)],] <- diag(nrow=q*(q+1)/2)
   tildeQ <- matrix(aperm(array(Q,dim=c(q,q,q*(q+1)/2)),c(1,3,2)),q*q*(q+1)/2,q)
 
-  # minimization function
+  # maximization function for ordinal responses ----
+  estimate.eta <- function(i, ...) {
+    # manual encoding of likelihood function
+    y <- mydata[[i]][!is.na(mydata[[i]])]
+    tmp <- tibble(factor(i,levels=items))
+    names(tmp) <- item.name
+    my.offset  <- predict_slim(m.fixed.new,full_join(mydata,tmp,by=character()))[!is.na(mydata[[i]])]
+    my.res <- optim(par=c(sigma2[[i]]-0.001,eta[[i]][1],diff(eta[[i]])-0.001),
+                    fn=my.clm,gr=NULL,
+                    y=y,ff=my.offset,logF=log_pnorm)
+    # thresholds
+    my.levels     <- ordinal.levels[[i]]
+    my.eta        <- cumsum(c(my.res$par[2],abs(my.res$par[-(1:2)])+0.001))
+    names(my.eta) <- paste(my.levels[-length(my.levels)],my.levels[-1],sep="|")
+    # variance
+    my.sigma2     <- abs(my.res$par[1])+0.001
+
+    # return result
+    return(list(eta=my.eta,sigma2=my.sigma2,logL= -my.res$value/BB, entropy=my.res$value/(length(y)*BB)))
+  }
+
+  # minimization function ----
   estimate.mu.psi <- function(s, ...) {
     # objective function
-    F1 <- function(par,gradient=TRUE,hessian=TRUE) {
+    F1 <- function(par,gradient=!TRUE,hessian=!TRUE) {
       # psi dimension
       r <- q*(q+1)/2
 
       # hack: replace zero diagonal by small number
-      par[q+cumsum(1:q)] <- par[q+cumsum(1:q)] + (par[q+cumsum(1:q)]==0)*1e-4
+      par[q+cumsum(1:q)] <- par[q+cumsum(1:q)] + (par[q+cumsum(1:q)]==0)*1e-8
 
       # unfold parameter
       mu.s  <- par[1:q]
@@ -229,31 +300,31 @@ MM_probit <- function(maxit,sig.level,verbose,
       one.psi <- rep(0,r); one.psi[cumsum(1:q)] <- 1/par[q+cumsum(1:q)]
 
       # update data frame
-      if (q > 1) {
-        data.s[,random.eff] <-
-          matrix(rep(matrix(mu.s,B,q,byrow=TRUE) + t(invPsi%*%U),
-                     each=nrow(data.s)/B),nrow(data.s),q)
-      } else {
-        data.s[,random.eff] <-
-          rep(matrix(mu.s,B,q,byrow=TRUE) + t(invPsi%*%U),
-              each=nrow(data.s)/B)
-      }
+      data.s[,random.eff] <- matrix(mu.s,nrow(data.s),q,byrow=TRUE) + U.s%*%t(invPsi)
       data.s.long <- pivot_longer(data.s,all_of(items), names_to = item.name, values_to = response.name)
       data.s.long <- data.s.long[!is.na(data.s.long[[response.name]]),]
+      # first use item.name as a factor
+      data.s.long[[item.name]] <- factor(data.s.long[[item.name]],levels=items)
+      tmp <- predict_slim(m.fixed,newdata=data.s.long)
+      # thereafter recode as numeric
+      data.s.long[[item.name]] <- as.numeric(data.s.long[[item.name]])
 
       # compute sum over observations
       inner.sum <- colSums(matrix(
         mapply(function(name,value,f){
-          ifelse(is.element(name,items.interval),
+          ifelse(is.element(items[name],items.interval),
                  log(sigma2[[name]])/2+((value-f)^2)/(2*sigma2[[name]]),
-                 -log(pnorm(c(eta[[name]],Inf)[value]-f)-
-                        pnorm(c(-Inf,eta[[name]])[value]-f)))},
-          data.s.long[[item.name]],data.s.long[[response.name]],
-          predict_slim(m.fixed,newdata=data.s.long)),
+                 -log_pnorm((c(eta[[name]],Inf)[value]-f)/sqrt(sigma2[[name]]),
+                            (c(-Inf,eta[[name]])[value]-f)/sqrt(sigma2[[name]]))
+                 )},
+          data.s.long[[item.name]],data.s.long[[response.name]],tmp),
         nrow(data.s.long)/B,B),na.rm=TRUE)
 
       # hack: set infinite inner sums to a large number
-      inner.sum[is.infinite(inner.sum)] <- 1e4
+      if (any(is.infinite(inner.sum))) {
+        warning(paste0(sum(is.infinite(inner.sum)),"infinites in inner sum"))
+        inner.sum[is.infinite(inner.sum)] <- 1e6
+      }
 
       # compute F1
       res <- sum(log(abs(par[q+cumsum(1:q)]))) - q/2 - log(det(Gamma)) +
@@ -308,15 +379,23 @@ MM_probit <- function(maxit,sig.level,verbose,
     }
 
     # sample random input
-    U <- matrix(rnorm(q*B),q,B); rownames(U) <- random.eff
+#    U <- as_tibble(cbind(rep(subjects[s],each=B),t(matrix(UU[,1:B,s],q,B))),
+#                   .name_repair = "minimal")
+    U <- as_tibble(cbind(rep(subjects[s],each=B),t(matrix(rnorm(q*B),q,B))),
+                   .name_repair = "minimal")
+    names(U) <- c(subject.name,random.eff)
 
-    # set-up data matrix
-    data.s <- merge(filter(data,(!!as.name(subject.name))==subjects[s]),t(U),by=NULL)
-    for (i in items.ordinal) data.s[[i]] <- as.numeric(data.s[[i]])
+    # set-up data matrix and random input for F1
+    data.s <- full_join(filter(data,(!!as.name(subject.name))==subjects[s]),
+                        U,by=subject.name)
+    U.s <- as.matrix(data.s[,random.eff])
+    U   <- t(as.matrix(U[,random.eff]))
 
     # minimize F1 if there are any observations
     if (any(!is.na(c(as.matrix(data.s[,c(items.interval,items.ordinal)]))))) {
-      res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
+#      res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
+      res <- optim(c(mu[s,],psi[s,]),F1)
+      res <- list(minimum=res$value,estimate=res$par)
     } else {
       res <- list(minimum=0,estimate=c(mu[s,],psi[s,]))
     }
@@ -325,104 +404,35 @@ MM_probit <- function(maxit,sig.level,verbose,
     return(c(res$minimum,res$estimate))
   }
 
+  # Hack: Fix sample of normal distributions
+  #UU <- array(rnorm(q*max(B,BB)*length(subjects)),dim=c(q,max(B,BB),length(subjects)))
+
   # MM-loop ----
   code <- 1
   pval <- NA
-  logL.prev <- -Inf
-  for (iter in 1:maxit) {
+  for (iter in 1:sum(maxit)) {
     # maximization step ----
 
     # estimate model parameters?
     if (estimate.models) {
-
-      # set-up data matrix with random input
-      U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
-                     .name_repair = "minimal")
-      names(U) <- c(subject.name,random.eff)
-      for (s in 1:length(subjects)) {
-        U[U[[subject.name]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q))%*%matrix(rnorm(BB*q),q,BB))
-      }
-
-      mydata <- full_join(data,U,by=subject.name)
-
-      # set-up random input for ordinal responses
-      my.runif <- matrix(runif(length(items.ordinal)*nrow(mydata)),
-                         length(items.ordinal),nrow(mydata))
-      rownames(my.runif) <- items.ordinal
-
-      # iterations of maximization step
-      logL.new <- -Inf
-      for (M.iter in 1:10) {
-        # predict with previous model and simulate responses for ordinal variables
-        for (i in items.ordinal) {
-          ii  <- !is.na(mydata[[i]])
-          NN  <- sum(ii)
-          tmp <- tibble(factor(rep(i,NN),levels=items))
-          names(tmp) <- item.name
-          my.offset  <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
-          tmp <- as.numeric(mydata[[i]][ii])
-          mydata[,i] <- rep(as.numeric(NA),nrow(mydata))
-          mydata[ii,i] <- my.offset + qnorm(
-            pnorm(c(-Inf,eta[[i]])[tmp]-my.offset) +
-              (pnorm(c(eta[[i]],Inf)[tmp]-my.offset) - pnorm(c(-Inf,eta[[i]])[tmp]-my.offset))*my.runif[i,ii]
-          )
-        }
-
-        # linear regression
-        mydata  <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
-        mydata[[item.name]] <- factor(mydata[[item.name]],levels=items)
-        m.fixed <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
-                                data=mydata)
-
-        # initiate log(likelihood)
-        logL <- 0
-
-        # estimate sigma's
-        ii <- !is.na(mydata[[response.name]])
-        mydata[ii,response.name] <- mydata[ii,response.name] - predict_slim(m.fixed,newdata=mydata[ii,])
-        mydata <- pivot_wider(mydata,names_from = all_of(item.name), values_from = all_of(response.name))
-        for (i in items.interval) {
-          sigma2[[i]] <- mean((mydata[[i]]-mean(mydata[[i]],na.rm=TRUE))^2,na.rm=TRUE)
-          # add log(likelihood)
-          logL <- logL - sum(!is.na(mydata[[i]]))*(log(sigma2[[i]])+1)/(2*BB)
-        }
-
-        # predict with previous model and update threshold parameters
-        # Remark: Reuses random input U from above
-        mydata <- full_join(data,U,by=subject.name)
-        for (i in items.ordinal) {
-          ii  <- !is.na(mydata[[i]])
-          NN  <- sum(ii)
-          tmp <- tibble(factor(rep(i,NN),levels=items))
-          names(tmp) <- item.name
-          my.offset  <- predict_slim(m.fixed,bind_cols(mydata[ii,],tmp))
-          # estimate thresholds from ordinal regression
-          m.clm    <- ordinal::clm(mydata[[i]][ii]~offset(my.offset),link="probit")
-          eta[[i]] <- m.clm$alpha
-          # add log(likelihood)
-          logL <- logL + m.clm$logLik/BB
-        }
-
-        # end Miter
-        if (logL.new > logL) break
-        logL.new <- logL
-      }
-
       # estimate random effects models
+      U <- as_tibble(cbind(subjects,mu),.name_repair = "minimal")
+      names(U) <- c(subject.name,random.eff)
       data.short <- data %>% group_by(!!as.name(subject.name)) %>% slice_head(n=1)
-      U          <- as.data.frame(cbind(subjects,mu))
-      names(U)   <- c(subject.name,random.eff)
       data.short <- full_join(data.short,U,by=subject.name)
-      for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
-
-      # means of random effects
-      for (i in 1:q) mean.Z[,i] <- predict_slim(m.random[[i]],data.short)
+      for (i in 1:q) {
+        m.random[[i]] <- lm(random[[i]],data=data.short)
+        data.short[[random.eff[i]]] <- residuals(m.random[[i]])
+      }
 
       # estimate Gamma
-      hat.var <- matrix(rowMeans(matrix(
-        apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
-          apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
-        ,q*q,nrow(mu))),q,q)
+      #      hat.var <- matrix(rowMeans(matrix(
+      #        apply(mu-mean.Z,1,function(x){x%*%t(x)}) +
+      #          apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))})
+      #        ,q*q,nrow(mu))),q,q)
+      hat.var <- var(data.short[,random.eff])*(1-(1/nrow(data.short))) +
+        matrix(rowMeans(matrix(apply(psi,1,function(x){solve(t(matrix(Q%*%x,q,q))%*%matrix(Q%*%x,q,q))}),
+                               q*q,nrow(psi))),q,q)
       if (dependence=="marginal") {
         hat.var[upper.tri(hat.var)] <- 0
         hat.var[lower.tri(hat.var)] <- 0
@@ -430,23 +440,138 @@ MM_probit <- function(maxit,sig.level,verbose,
       Gamma <- chol(solve(hat.var))
       rownames(Gamma) <- colnames(Gamma) <- random.eff
 
+      # reinitiate mu via two-component maxit?
+      if ((iter==maxit[1]) & (iter<sum(maxit))) {
+        for (i in 1:q) mu[,i] <- predict(m.random[[i]])
+      }
+
+      # fixed effects estimation below
+
+      # set-up data matrix with random input
+      U <- as_tibble(cbind(rep(subjects,each=BB),matrix(0,length(subjects)*BB,q)),
+                     .name_repair = "minimal")
+      names(U) <- c(subject.name,random.eff)
+
+      # set-up random input for ordinal responses
+      my.runif <- vector("list",length(items.ordinal))
+      names(my.runif) <- items.ordinal
+      for (i in items.ordinal) my.runif[[i]] <- runif(nrow(data)*BB)
+
+      # iterations of maximization step (at least 1 step done, at most 10 steps done)
+      logL <- -Inf
+      for (M.iter in 1:10) {
+        # simulate random effects and set-up data frame
+        for (s in 1:length(subjects)) {
+          U[U[[subject.name]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(rnorm(q*BB),q,BB)))
+          #U[U[[subject.name]]==subjects[s],-1] <- t(mu[s,] + solve(matrix(Q%*%psi[s,],q,q),matrix(UU[,1:BB,s],q,BB)))
+        }
+        mydata <- full_join(data,U,by=subject.name)
+
+        # predict with previous model and simulate responses for ordinal variables
+        for (i in items.ordinal) {
+          tmp <- tibble(factor(i,levels=items))
+          names(tmp) <- item.name
+          my.offset  <- predict_slim(m.fixed,full_join(mydata,tmp,by=character()))
+
+          # simulated underlying normal and insert in data
+          a <- (c(-Inf,eta[[i]])[mydata[[i]]] - my.offset)/sqrt(sigma2[[i]])
+          b <- (c(eta[[i]],Inf)[mydata[[i]]] - my.offset)/sqrt(sigma2[[i]])
+          flip <- -sign(a)
+          a <- pnorm(flip*a)
+          b <- pnorm(flip*b)
+          mydata[[i]] <- my.offset + sqrt(sigma2[[i]])*flip*qnorm(pmin(a,b) + abs(b-a)*my.runif[[i]])
+        }
+
+        # linear regression
+        mydata <- pivot_longer(mydata,all_of(items),names_to = item.name, values_to = response.name)
+        mydata[[item.name]]   <- factor(mydata[[item.name]],levels=items)
+        mydata[[weight.name]] <- 1/unlist(sigma2)[as.numeric(mydata[[item.name]])]
+        m.fixed.new <- biglm::biglm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
+                                    weight = eval(substitute(formula(~w),list(w=as.name(weight.name)))),
+                                    data = filter(mydata,!is.na(!!as.name(response.name))))
+#        m.fixed <- lm(eval(substitute(update(formula(fixed),y~.),list(y=as.name(response.name)))),
+#                                weight = weighted.OLS, data=mydata)
+
+        # initiate log(likelihood)
+        if (verbose>1) cat("Step",M.iter,":")
+        logL.new   <- 0
+        sigma2.new <- sigma2
+        eta.new    <- eta
+
+        # estimate sigma's for interval responses using 'mydata' from above
+        mydata[[response.name]] <- mydata[[response.name]] - predict_slim(m.fixed.new,newdata=mydata)
+        for (i in items.interval) {
+          tmp <- (mydata[[response.name]])[mydata[[item.name]]==i]
+          sigma2.new[[i]] <- mean(tmp^2,na.rm=TRUE)
+          # add log(likelihood)
+          logL.new <- logL.new - sum(!is.na(tmp))*(log(sigma2.new[[i]])+1)/(2*BB)
+          if (verbose>1) cat(sqrt(sigma2.new[[i]]),",")
+        }
+
+        # estimate eta's, possibly in parallel session
+#        future::plan("multisession", workers = 4, gc=TRUE)
+        mydata <- full_join(data,U,by=subject.name)
+        res    <- furrr::future_map(items.ordinal,estimate.eta,.options = furrr::furrr_options(seed = TRUE))
+        names(res) <- items.ordinal
+#        future:::ClusterRegistry("stop")
+
+        # extract results for ordinal regressions
+        logL.new <- logL.new + sum(sapply(res,function(x){x$logL}))
+        eta.new[items.ordinal]    <- sapply(res,function(x){x$eta})
+        sigma2.new[items.ordinal] <- sapply(res,function(x){x$sigma2})
+        if (verbose>1) cat(sapply(res,function(x){x$entropy}))
+
+        # end Miter
+        if (verbose>1) cat(": logL=",logL.new,"\n")
+        if (logL > logL.new) break
+        logL    <- logL.new
+        m.fixed <- m.fixed.new
+        sigma2  <- sigma2.new
+        eta     <- eta.new
+      }
+
       # end model estimations
+      rm(data.short,mydata,logL.new,m.fixed.new,sigma2.new,eta.new)
     }
 
     # minimization step ----
 
-    # minimizations allowing for parallization via future::plan()
-    res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
-    if (verbose > 1) cat("\n")
+    # means of random effects
+    mean.Z <- matrix(0,length(subjects),q)
+    for (i in 1:q) {
+      mean.Z[,i] <- predict_slim(m.random[[i]],
+                                 slice_head(group_by(data,!!as.name(subject.name)),n=1))
+    }
 
+    # minimizations allowing for parallization via future::plan()
+#    future::plan("multisession", workers = 4, gc=TRUE)
+    res <- furrr::future_map(1:length(subjects),estimate.mu.psi,.progress=(verbose > 1),.options = furrr::furrr_options(seed = TRUE))
     F1.new <- sapply(res,function(x){x[1]})
+#    future:::ClusterRegistry("stop")
 
     # convergence diagnostics
+    if (verbose > 1) cat("\n")
     if (iter==1) {
-      if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", F1=",sum(F1.new),"\n")
+      if (verbose > 0) cat("iteration",iter,": logL=",logL,", F1=",sum(F1.new),"\n")
     } else {
       pval <- t.test(F1.new-F1.best,alternative="less")$p.value
-      if (verbose > 0) cat("iteration",iter,": logL=",logL.new,", F1=",sum(F1.new),", change=",sum(F1.new-F1.best),", p-value(no decrease)=",pval,"\n")
+      if (verbose > 0) cat("iteration",iter,": logL=",logL,", F1=",sum(F1.new),", change=",sum(F1.new-F1.best),", p-value(no decrease)=",pval,"\n")
+    }
+
+    if (verbose>2) {
+      if (iter==1) {
+        print(ggplot(data.frame(x=F1.new),aes(x=x)) + geom_density(fill="lightgreen") +
+                xlab("Iteration 1: F1 per subject"))
+      } else {
+        print(ggExtra::ggMarginal(ggplot(data.frame(x=F1.best,y=F1.new),aes(x=x,y=y)) +
+                                    geom_point() + geom_abline(intercept=0, slope=1, col="red") +
+                                    xlab(paste0("Iteration ",iter-1,": F1 per subject")) +
+                                    ylab(paste0("Iteration ",iter,": F1 per subject")) +
+                                    xlim(min(F1.best,F1.new),max(F1.best,F1.new)) +
+                                    ylim(min(F1.best,F1.new),max(F1.best,F1.new)),
+                                  type="density",fill="lightgreen"))
+
+      }
     }
 
     # break MM-loop?
@@ -463,15 +588,23 @@ MM_probit <- function(maxit,sig.level,verbose,
     # end MM-loop
   }
 
+  # TO DO: In principle logL should be updated if MM-loop reaches maxiter
+
   # naming
   colnames(mu) <- random.eff
 
+  # recode ordinal variables
+  for (i in items.ordinal) {
+    data[[i]] <- ordered((ordinal.levels[[i]])[data[[i]]],levels=ordinal.levels[[i]])
+  }
+
   # return probit-object ----
-  return(structure(list(fixed=fixed,response.name=response.name,
+  return(structure(list(fixed=fixed,response.name=response.name,weight.name=weight.name,
                         item.name=item.name,items.interval=items.interval,items.ordinal=items.ordinal,
+                        ordinal.levels=ordinal.levels,
                         subject.name=subject.name,random=random,dependence=dependence,
                         m.fixed=m.fixed,sigma2=sigma2,eta=eta,m.random=m.random,Gamma=Gamma,
                         mu=mu,psi=psi,
-                        B=B,BB=BB,F1=F1.best,pvalue=pval,iter=iter,code=code,
+                        B=B,BB=BB,logL=logL,F1=F1.best,pvalue=pval,iter=iter,code=code,
                         data=data),class="probit"))
 }

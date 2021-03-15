@@ -66,6 +66,11 @@ update.probit <- function(object,fixed=NULL,random=NULL,A=NULL,dependence=NULL,d
   # fix dependence
   if (dependence!="marginal") dependence <- "joint"
 
+  # recode ordinal variables as numeric
+  for (i in object$items.ordinal) {
+    data[[i]] <- as.numeric(data[[i]])
+  }
+
   # find random effects
   new_random.eff <- sapply(random,function(x){all.vars(x[[2]])})
   old_random.eff <- sapply(object$random,function(x){all.vars(x[[2]])})
@@ -99,8 +104,10 @@ update.probit <- function(object,fixed=NULL,random=NULL,A=NULL,dependence=NULL,d
   for (i in 1:ncol(object$mu)) {
     old_mu[,i] <- predict(object$m.random[[i]],newdata=data.short)
   }
-  # initiate psi at the mean (doesn't necessarily make any sense)
-  old_psi <- matrix(colMeans(object$psi),length(new_subjects),ncol(object$psi),byrow=TRUE)
+#  # initiate psi at the mean (doesn't necessarily make any sense)
+#  old_psi <- matrix(colMeans(object$psi),length(new_subjects),ncol(object$psi),byrow=TRUE)
+  # initiate psi at Gamma
+  old_psi <- matrix(object$Gamma[upper.tri(object$Gamma,diag=TRUE)],length(new_subjects),ncol(object$psi),byrow=TRUE)
   # reset (mu,psi) for known subjects at their present value
   ii <- is.element(new_subjects,old_subjects)
   old_mu[ii,]  <- object$mu[match(new_subjects,old_subjects)[ii]]
@@ -116,29 +123,31 @@ update.probit <- function(object,fixed=NULL,random=NULL,A=NULL,dependence=NULL,d
     psi[s,] <- tmp[upper.tri(tmp,diag = TRUE)]
   }
 
-  # estimate random effects models
-  # TO DO: really update m.random like this??
-  if (estimate.models) {
-    m.random <- vector("list",length(new_random.eff))
-    names(m.random) <- new_random.eff
-    data.short <- data %>% group_by(!!as.name(object$subject.name)) %>% slice_head(n=1)
-    U <- as.data.frame(cbind(new_subjects,mu))
-    names(U) <- c(object$subject.name,new_random.eff)
-    data.short <- full_join(data.short,U,by=object$subject.name)
-    for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
-  }
-
   # update Gamma
   Gamma <- chol(solve(A%*%solve(t(object$Gamma)%*%object$Gamma)%*%t(A) +
                         diag(1e-4,nrow=nrow(A))))
 
+#  # estimate random effects models
+#  # TO DO: really update m.random like this??
+#  if (estimate.models) {
+#    m.random <- vector("list",length(new_random.eff))
+#    names(m.random) <- new_random.eff
+#    data.short <- data %>% group_by(!!as.name(object$subject.name)) %>% slice_head(n=1)
+#    U <- as.data.frame(cbind(new_subjects,mu))
+#    names(U) <- c(object$subject.name,new_random.eff)
+#    data.short <- full_join(data.short,U,by=object$subject.name)
+#    for (i in 1:q) m.random[[i]] <- lm(random[[i]],data=data.short)
+#  }
+
   # refit and return
-  return(MM_probit(maxit,sig.level,verbose,
-                   fixed,object$response.name,object$item.name,object$items.interval,object$items.ordinal,
-                   object$subject.name,random,dependence,
-                   m.fixed,object$sigma2,object$eta,m.random,Gamma,
-                   mu,psi,
-                   B,BB,
-                   data,
+  return(probit:::MM_probit(maxit=maxit,sig.level=sig.level,verbose=verbose,
+                   fixed=fixed,response.name=object$response.name,weight.name=object$weight.name,
+                   item.name=object$item.name,items.interval=object$items.interval,items.ordinal=object$items.ordinal,
+                   ordinal.levels=object$ordinal.levels,
+                   subject.name=object$subject.name,random=random,dependence=dependence,
+                   m.fixed=m.fixed,sigma2=object$sigma2,eta=object$eta,m.random=m.random,Gamma=Gamma,
+                   mu=mu,psi=psi,
+                   B=B,BB=BB,
+                   data=data,
                    estimate.models=estimate.models))
 }

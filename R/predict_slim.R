@@ -30,6 +30,9 @@ predict_slim <- function(object,newdata) {
   if (!is.null(attr(object$terms, "offset"))) res <- res +
       model.offset(model.frame(delete.response(terms(object)),newdata))
 
+  # clean up
+  rm(theta,theta_notNA,X)
+
   # return
   return(res)
 }
