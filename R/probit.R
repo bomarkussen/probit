@@ -561,12 +561,12 @@ MM_probit <- function(maxit,sig.level,verbose,
     if (verbose>2) {
       if (iter==1) {
         print(ggplot(data.frame(x=F1.new),aes(x=x)) + geom_density(fill="lightgreen") +
-                xlab("Iteration 1: F1 per subject"))
+                xlab(paste0("Iteration 1: sum(F1)=",round(sum(F1.new),2))))
       } else {
         print(ggExtra::ggMarginal(ggplot(data.frame(x=F1.best,y=F1.new),aes(x=x,y=y)) +
                                     geom_point() + geom_abline(intercept=0, slope=1, col="red") +
-                                    xlab(paste0("Iteration ",iter-1,": F1 per subject")) +
-                                    ylab(paste0("Iteration ",iter,": F1 per subject")) +
+                                    xlab(paste0("Iteration ",iter-1,": sum(F1)=",round(sum(F1.best),2))) +
+                                    ylab(paste0("Iteration ",iter,": sum(F1)=",round(sum(F1.new),2))) +
                                     xlim(min(F1.best,F1.new),max(F1.best,F1.new)) +
                                     ylim(min(F1.best,F1.new),max(F1.best,F1.new)),
                                   type="density",fill="lightgreen"))
