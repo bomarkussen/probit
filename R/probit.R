@@ -283,7 +283,7 @@ MM_probit <- function(maxit,sig.level,verbose,
   # minimization function ----
   estimate.mu.psi <- function(s, ...) {
     # objective function
-    F1 <- function(par,gradient=TRUE,hessian=TRUE) {
+    F1 <- function(par,gradient=!TRUE,hessian=!TRUE) {
       # psi dimension
       r <- q*(q+1)/2
 
@@ -393,9 +393,9 @@ MM_probit <- function(maxit,sig.level,verbose,
 
     # minimize F1 if there are any observations
     if (any(!is.na(c(as.matrix(data.s[,c(items.interval,items.ordinal)]))))) {
-      res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
-#      res <- optim(c(mu[s,],psi[s,]),F1)
-#      res <- list(minimum=res$value,estimate=res$par)
+      #res <- nlm(F1,c(mu[s,],psi[s,]),check.analyticals = FALSE)
+      res <- optim(c(mu[s,],psi[s,]),F1)
+      res <- list(minimum=res$value,estimate=res$par)
     } else {
       res <- list(minimum=0,estimate=c(mu[s,],psi[s,]))
     }
